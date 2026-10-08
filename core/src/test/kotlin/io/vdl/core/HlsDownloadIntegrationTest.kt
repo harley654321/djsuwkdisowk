@@ -14,12 +14,16 @@ import okhttp3.OkHttpClient
 import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import javax.crypto.Cipher
@@ -366,6 +370,140 @@ class HlsDownloadIntegrationTest {
         assertTrue("expected success but was $result", result is HlsOutcome.Success)
         assertArrayEquals(slice1 + slice2, out.readBytes())
     }
+
+    // ---------------------------------------------------------- resume
+
+    @Test
+    fun resumesOnlyRemainingUnitsAfterInterruptedRun() {
+        val init = randomBytes(712, seed = 1)
+        val s1 = randomBytes(40_000, seed = 2)
+        val s2 = randomBytes(41_000, seed = 3)
+        val playlist = """
+            #EXTM3U
+            #EXT-X-TARGETDURATION:4
+            #EXT-X-MAP:URI="init.mp4"
+            #EXTINF:4.0,
+            media.1.m4s
+            #EXTINF:4.0,
+            media.2.m4s
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        val healthy = AtomicBoolean(false)
+        val initHits = AtomicInteger(0)
+        val seg1Hits = AtomicInteger(0)
+        val seg2Hits = AtomicInteger(0)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                return when (request.url.encodedPath) {
+                    "/master.m3u8" -> MockResponse.Builder().code(200).body(m3u(playlist)).build()
+                    "/init.mp4" -> { initHits.incrementAndGet(); MockResponse.Builder().code(200).body(Buffer().write(init)).build() }
+                    "/media.1.m4s" -> { seg1Hits.incrementAndGet(); MockResponse.Builder().code(200).body(Buffer().write(s1)).build() }
+                    "/media.2.m4s" -> {
+                        seg2Hits.incrementAndGet()
+                        if (healthy.get()) MockResponse.Builder().code(200).body(Buffer().write(s2)).build()
+                        else MockResponse.Builder().code(500).build()
+                    }
+                    else -> MockResponse.Builder().code(404).build()
+                }
+            }
+        }
+        val out = File(tmp, "video.mp4")
+        val ledgerFile = File(tmp, "video.mp4.vdl-units")
+
+        // run 1: the second segment exhausts its attempts -> Retryable
+        val r1 = kotlinx.coroutines.runBlocking {
+            downloader().download(url("/master.m3u8"), out, maxHeight = null, policy = policy()) { }
+        }
+        assertTrue("expected retryable but was $r1", r1 is HlsOutcome.Retryable)
+        assertTrue("ledger expected after interrupted run", ledgerFile.exists())
+        assertEquals(
+            "ledger entries: init(idx=0)+seg1(idx=1)",
+            listOf("0 0 712", "1 712 40000"),
+            ledgerFile.readLines()
+        )
+        assertArrayEquals("partial file must hold completed units", init + s1, out.readBytes())
+
+        // run 2 (resume): only the missing segment is fetched
+        sink.lines.clear()
+        healthy.set(true)
+        val r2 = kotlinx.coroutines.runBlocking {
+            downloader().download(url("/master.m3u8"), out, maxHeight = null, policy = policy(), resume = true) { }
+        }
+        assertTrue("expected success but was $r2", r2 is HlsOutcome.Success)
+        assertEquals("init must NOT be re-fetched", 1, initHits.get())
+        assertEquals("seg1 must NOT be re-fetched", 1, seg1Hits.get())
+        assertEquals("seg2: 4 failed attempts + 1 resume fetch", 5, seg2Hits.get())
+        assertArrayEquals(init + s1 + s2, out.readBytes())
+        assertFalse("ledger must be cleared on success", ledgerFile.exists())
+        assertTrue(
+            "resume evidence log expected",
+            sink.lines.any { it.contains("resume kind=video unitsDone=2") }
+        )
+        assertTrue(
+            "unit skip evidence log expected",
+            sink.lines.any { it.contains("unit skip kind=video idx=1") }
+        )
+    }
+
+    @Test
+    fun resumeWithStaleLedgerRestartsFromZero() {
+        val init = randomBytes(712, seed = 1)
+        val s1 = randomBytes(40_000, seed = 2)
+        val s2 = randomBytes(41_000, seed = 3)
+        val playlist = """
+            #EXTM3U
+            #EXT-X-TARGETDURATION:4
+            #EXT-X-MAP:URI="init.mp4"
+            #EXTINF:4.0,
+            media.1.m4s
+            #EXTINF:4.0,
+            media.2.m4s
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        val healthy = AtomicBoolean(false)
+        val initHits = AtomicInteger(0)
+        val seg1Hits = AtomicInteger(0)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                return when (request.url.encodedPath) {
+                    "/master.m3u8" -> MockResponse.Builder().code(200).body(m3u(playlist)).build()
+                    "/init.mp4" -> { initHits.incrementAndGet(); MockResponse.Builder().code(200).body(Buffer().write(init)).build() }
+                    "/media.1.m4s" -> { seg1Hits.incrementAndGet(); MockResponse.Builder().code(200).body(Buffer().write(s1)).build() }
+                    "/media.2.m4s" ->
+                        if (healthy.get()) MockResponse.Builder().code(200).body(Buffer().write(s2)).build()
+                        else MockResponse.Builder().code(500).build()
+                    else -> MockResponse.Builder().code(404).build()
+                }
+            }
+        }
+        val out = File(tmp, "video.mp4")
+        val ledgerFile = File(tmp, "video.mp4.vdl-units")
+
+        // run 1 interrupted: ledger + partial file
+        val r1 = kotlinx.coroutines.runBlocking {
+            downloader().download(url("/master.m3u8"), out, maxHeight = null, policy = policy()) { }
+        }
+        assertTrue(r1 is HlsOutcome.Retryable)
+        assertTrue(ledgerFile.exists())
+
+        // stale: the output shrank below the ledger range -> ledger must be discarded
+        RandomAccessFile(out, "rw").use { it.setLength(100L) }
+        healthy.set(true)
+        sink.lines.clear()
+        val r2 = kotlinx.coroutines.runBlocking {
+            downloader().download(url("/master.m3u8"), out, maxHeight = null, policy = policy(), resume = true) { }
+        }
+        assertTrue("expected success but was $r2", r2 is HlsOutcome.Success)
+        assertEquals("init re-fetched after ledger discard", 2, initHits.get())
+        assertEquals("seg1 re-fetched after ledger discard", 2, seg1Hits.get())
+        assertArrayEquals("full restart must rebuild the file exactly", init + s1 + s2, out.readBytes())
+        assertFalse(ledgerFile.exists())
+        assertTrue(
+            "ledger discard evidence log expected",
+            sink.lines.any { it.contains("ledger beyond file") }
+        )
+    }
+
 }
 
 // -------------------------------------------- separate audio rendition track

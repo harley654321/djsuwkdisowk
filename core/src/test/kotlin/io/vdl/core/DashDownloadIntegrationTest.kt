@@ -13,10 +13,12 @@ import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -160,5 +162,66 @@ class DashDownloadIntegrationTest {
         assertTrue(sink.lines.any { it.contains("DRM-protected MPD") })
         // no segment URL was ever requested
         assertEquals(1, server.requestCount)
+    }
+
+    // ---------------------------------------------------------- resume
+
+    @Test
+    fun resumesOnlyRemainingUnitsAfterInterruptedRun() = runBlocking {
+        val healthy = AtomicBoolean(false)
+        val initHits = AtomicInteger(0)
+        val seg1Hits = AtomicInteger(0)
+        val seg2Hits = AtomicInteger(0)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.url.encodedPath == "/master.mpd" -> MockResponse.Builder().code(200).body(m3u(mpd())).build()
+                request.url.encodedPath == "/video/720/init.mp4" -> {
+                    initHits.incrementAndGet()
+                    MockResponse.Builder().code(200).body(raw(videoInit)).build()
+                }
+                request.url.encodedPath == "/video/720/seg_1.m4s" -> {
+                    seg1Hits.incrementAndGet()
+                    MockResponse.Builder().code(200).body(raw(vSeg[0])).build()
+                }
+                request.url.encodedPath == "/video/720/seg_2.m4s" -> {
+                    seg2Hits.incrementAndGet()
+                    if (healthy.get()) MockResponse.Builder().code(200).body(raw(vSeg[1])).build()
+                    else MockResponse.Builder().code(500).build()
+                }
+                else -> MockResponse.Builder().code(404).build()
+            }
+        }
+        val out = File(tmp, "rv.part")
+        val ledgerFile = File(tmp, "rv.part.vdl-units")
+
+        // run 1: seg_2 exhausts its attempts -> Retryable, ledger holds units 0+1
+        val r1 = downloader().download(url("/master.mpd"), out, maxHeight = 720, policy = policy()) {}
+        assertTrue("expected retryable but was $r1", r1 is DashOutcome.Retryable)
+        assertTrue("ledger expected after interrupted run", ledgerFile.exists())
+        assertEquals(
+            "ledger entries: init(idx=0)+seg1(idx=1)",
+            listOf("0 0 ${videoInit.size}", "1 ${videoInit.size} ${vSeg[0].size}"),
+            ledgerFile.readLines()
+        )
+        assertArrayEquals("partial file must hold completed units", videoInit + vSeg[0], out.readBytes())
+
+        // run 2 (resume): only the missing segment is fetched
+        sink.lines.clear()
+        healthy.set(true)
+        val r2 = downloader().download(url("/master.mpd"), out, maxHeight = 720, policy = policy(), resume = true) {}
+        assertTrue("expected success but was $r2", r2 is DashOutcome.Success)
+        assertEquals("init must NOT be re-fetched", 1, initHits.get())
+        assertEquals("seg1 must NOT be re-fetched", 1, seg1Hits.get())
+        assertEquals("seg2: 4 failed attempts + 1 resume fetch", 5, seg2Hits.get())
+        assertArrayEquals(videoInit + vSeg[0] + vSeg[1], out.readBytes())
+        assertFalse("ledger must be cleared on success", ledgerFile.exists())
+        assertTrue(
+            "resume evidence log expected",
+            sink.lines.any { it.contains("resume kind=video unitsDone=2") }
+        )
+        assertTrue(
+            "unit skip evidence log expected",
+            sink.lines.any { it.contains("unit skip kind=video idx=1") }
+        )
     }
 }

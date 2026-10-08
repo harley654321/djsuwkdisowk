@@ -21,8 +21,8 @@ import java.io.RandomAccessFile
  * Scratch files live beside the part as "<id>.audio"/"<id>.muxed" and are
  * removed here or by PartFileFactory.cleanup (which deletes "<id>.*").
  *
- * Resume semantics mirror HLS: runs are unit-sequential but stateless
- * across runs, so a resumed task restarts from unit 0 (logged).
+ * Resume semantics mirror HLS: unit-level via the UnitLedger sidecar
+ * ("*.vdl-units") — completed units are skipped, mismatches discard.
  *
  * DASH segments are ISOBMFF (fMP4) by spec: after a successful mux the
  * contentType is video/mp4; TS AdaptationSets are refused with a typed
@@ -52,6 +52,7 @@ internal class DashQueueEngine internal constructor(
             maxHeight = task.maxHeight,
             policy = task.retryPolicy(),
             audioOut = audioFile,
+            resume = true, // unit ledger absent => clean start; present => skip done units
             onProgress = onProgress
         )
 

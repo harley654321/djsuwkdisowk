@@ -22,9 +22,10 @@ import java.io.RandomAccessFile
  * and are removed by the engine (or by PartFileFactory.cleanup on
  * cancel/publish-failure, which must delete every "<id>.*").
  *
- * Resume semantics: HLS runs are unit-sequential but stateless across
- * runs, so a paused-and-resumed task restarts from unit 0. Segment-level
- * resume is a later stage; this is logged, never hidden.
+ * Resume semantics: unit-level via the UnitLedger sidecar ("*.vdl-units").
+ * The downloader skips units whose byte range is already on disk and
+ * continues from the first missing one; a ledger that does not match the
+ * current plan (or a finished run) is discarded. All of it is logged.
  *
  * TS + separate audio rendition: MPEG-TS cannot be atom-muxed by Fmp4Muxer
  * (no ftyp/moov). Decision: publish the VIDEO track and delete the audio
@@ -55,6 +56,7 @@ internal class HlsQueueEngine internal constructor(
             maxHeight = task.maxHeight,
             policy = task.retryPolicy(),
             audioOut = audioFile,
+            resume = true, // unit ledger absent => clean start; present => skip done units
             onProgress = onProgress
         )
 

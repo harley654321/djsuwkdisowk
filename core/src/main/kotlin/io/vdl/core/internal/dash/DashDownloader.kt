@@ -4,6 +4,7 @@ import io.vdl.core.Progress
 import io.vdl.core.RetryPolicy
 import io.vdl.core.internal.engine.FetchResult
 import io.vdl.core.internal.engine.RetryFetch
+import io.vdl.core.internal.engine.UnitLedger
 import io.vdl.core.internal.logging.VdlLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +54,7 @@ internal class DashDownloader internal constructor(
         maxHeight: Int? = null,
         policy: RetryPolicy,
         audioOut: File? = null,
+        resume: Boolean = false,
         onProgress: (Progress) -> Unit
     ): DashOutcome = withContext(Dispatchers.IO) {
         val t0 = clockNanos()
@@ -83,14 +85,14 @@ internal class DashDownloader internal constructor(
         }
 
         val period = mpd.periods.first()
-        val video = when (val v = runTrack(mpdUrl, mpd, period, sel.video, out, policy, "video", t0, onProgress)) {
+        val video = when (val v = runTrack(mpdUrl, mpd, period, sel.video, out, policy, "video", t0, resume, onProgress)) {
             is Track -> v
             else -> return@withContext v as DashOutcome
         }
 
         var audio: Track? = null
         if (sel.audio != null && audioOut != null) {
-            audio = when (val a = runTrack(mpdUrl, mpd, period, sel.audio, audioOut, policy, "audio", t0, onProgress)) {
+            audio = when (val a = runTrack(mpdUrl, mpd, period, sel.audio, audioOut, policy, "audio", t0, resume, onProgress)) {
                 is Track -> a
                 else -> return@withContext a as DashOutcome
             }
@@ -126,6 +128,7 @@ internal class DashDownloader internal constructor(
         policy: RetryPolicy,
         kind: String,
         t0: Long,
+        resume: Boolean,
         onProgress: (Progress) -> Unit
     ): Any {
         val units = try {
@@ -137,18 +140,50 @@ internal class DashDownloader internal constructor(
         if (units.isEmpty()) return DashOutcome.Fatal("empty plan for ${rep.id}")
 
         val fetch = RetryFetch(client, log, TAG, sleeper)
+
+        // Unit-level resume: skip units whose byte range is already on disk.
+        val ledger = UnitLedger(UnitLedger.forOut(out), log, TAG)
+        var done = if (resume) ledger.load(if (out.exists()) out.length() else 0L) else emptyList()
+        // the ledger must be a prefix of the CURRENT plan (same indices, same order);
+        // a different plan (new variant, edited MPD) means the offsets are
+        // meaningless: discard and restart from zero.
+        if (done.isNotEmpty() && done.map { it.index } != units.take(done.size).map { it.index }) {
+            log.w(TAG) { "ledger plan mismatch kind=$kind done=${done.size} units=${units.size} decision=restart" }
+            done = emptyList()
+        }
+        val doneIdx = ArrayDeque(done)
+        if (done.isNotEmpty()) {
+            log.i(TAG) { "resume kind=$kind unitsDone=${done.size} firstPending=${done.last().index + 1} out=${out.name}" }
+        }
+
         var written = 0L
         RandomAccessFile(out, "rw").use { sink ->
-            sink.setLength(0L)
+            if (done.isEmpty()) {
+                sink.setLength(0L)
+                ledger.clear()
+            }
+            val recorded = mutableListOf<UnitLedger.Entry>()
             for (unit in units) {
                 if (!currentCoroutineContext().isActive) {
                     throw CancellationException("dash $kind download cancelled at unit ${unit.index}")
+                }
+                val already = doneIdx.firstOrNull()
+                if (already != null && already.index == unit.index) {
+                    // on disk and chained at the cursor: skip the fetch
+                    sink.seek(already.offset + already.length)
+                    written = already.offset + already.length
+                    doneIdx.removeFirst()
+                    log.d(TAG) { "unit skip kind=$kind idx=${unit.index} bytes=${already.length} total=$written dt=${elapsedMs(t0)}ms" }
+                    continue
                 }
                 when (val r = fetch.bytes(unit.url, policy, "$kind-unit")) {
                     is FetchResult.Bytes -> {
                         sink.seek(written)
                         sink.write(r.body)
+                        val offset = written
                         written += r.body.size
+                        recorded.add(UnitLedger.Entry(unit.index, offset, r.body.size.toLong()))
+                        ledger.save(recorded)
                         log.d(TAG) { "unit done kind=$kind idx=${unit.index} bytes=${r.body.size} total=$written dt=${elapsedMs(t0)}ms" }
                         onProgress(
                             Progress(
@@ -166,6 +201,7 @@ internal class DashDownloader internal constructor(
                 }
             }
         }
+        ledger.clear()
         log.i(TAG) { "track done kind=$kind rep=${rep.id} units=${units.size} bytes=$written dt=${elapsedMs(t0)}ms out=${out.name}" }
         return Track(written, units.size, 0.0)
     }
