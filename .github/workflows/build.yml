@@ -20,11 +20,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      # The ubuntu-24.04 image ships the Android SDK with licenses accepted;
+      # AGP auto-installs any missing platform/build-tools via sdkmanager.
 
       - name: Build and test
         run: ./gradlew :core:assembleDebug :core:assembleRelease :core:testDebugUnitTest :core:testReleaseUnitTest --no-daemon --stacktrace
