@@ -230,7 +230,7 @@ internal class AndroidStoragePublisher internal constructor(
         val parent = DocumentsContract.buildDocumentUriUsingTree(
             treeUri, DocumentsContract.getTreeDocumentId(treeUri)
         )
-        val doc = resolver.createDocument(parent, plan.mime, task.fileName)
+        val doc = DocumentsContract.createDocument(resolver, parent, plan.mime, task.fileName)
             ?: throw IOException("createDocument returned null (tree permission?)")
         try {
             resolver.openOutputStream(doc)?.use { out ->
