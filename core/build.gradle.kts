@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.room.gradle)
     `maven-publish`
 }
 
@@ -44,9 +45,11 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
     }
 }
 
-ksp {
-    arg("room.schemaLocation", "$projectDir/schemas")
-    arg("room.incremental", "true")
+// Room Gradle plugin: per-variant schema directories. The previous single
+// $projectDir/schemas location raced between parallel kspDebug/kspRelease
+// tasks (one truncates the JSON while the other deserializes it).
+room {
+    schemaDirectory("$projectDir/schemas")
 }
 
 dependencies {

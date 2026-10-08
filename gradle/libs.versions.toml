@@ -31,3 +31,4 @@ junit = { module = "junit:junit", version.ref = "junit" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+room-gradle = { id = "androidx.room", version.ref = "room" }
