@@ -7,7 +7,9 @@ package io.vdl.core
  * 1. unify separators, then normalize the path with a stack: `..` pops the
  *    previous kept segment (clamped at root) so traversal never escapes.
  * 2. replace hostile characters: `:`, shell metachars (*?"<>|) and
- *    control chars (<32, DEL) each become `_`.
+ *    control chars (<32, DEL) become `_`; a RUN of consecutive hostile
+ *    characters collapses into a single `_` (literal user underscores
+ *    are never touched).
  * 3. collapse whitespace runs, trim, and strip dots from both ends.
  * 4. cap at 120 chars preserving a short extension suffix.
  * 5. never empty: falls back to "download.bin".
@@ -31,14 +33,22 @@ internal object FileNameSanitizer {
         }
         var name = stack.joinToString(" ")
 
-        // 2. hostile characters
-        name = name.map { c ->
-            when {
-                c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' -> '_'
-                c.code < 32 || c.code == 127 -> '_'
-                else -> c
+        // 2. hostile characters; runs collapse to a single underscore so
+        // "a*?b" -> "a_b", while literal user underscores survive intact.
+        val sb = StringBuilder(name.length)
+        var prevReplaced = false
+        for (c in name) {
+            val hostile = c == ':' || c == '*' || c == '?' || c == '"' ||
+                c == '<' || c == '>' || c == '|' || c.code < 32 || c.code == 127
+            if (hostile) {
+                if (!prevReplaced) sb.append('_')
+                prevReplaced = true
+            } else {
+                sb.append(c)
+                prevReplaced = false
             }
-        }.joinToString("")
+        }
+        name = sb.toString()
 
         // 3. whitespace + dots
         name = name.replace(Regex("\\s+"), " ").trim().trim('.')
