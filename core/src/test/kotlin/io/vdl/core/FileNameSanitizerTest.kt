@@ -11,12 +11,12 @@ class FileNameSanitizerTest {
     fun stripsTraversal() {
         assertEquals("etc passwd", FileNameSanitizer.sanitize("../../etc/passwd"))
         assertEquals("etc passwd", FileNameSanitizer.sanitize("..\\..\\etc\\passwd"))
-        assertEquals("passwd", FileNameSanitizer.sanitize("a/../../b/passwd"))
+        assertEquals("b passwd", FileNameSanitizer.sanitize("a/../../b/passwd"))
     }
 
     @Test
     fun stripsSeparatorsAndColons() {
-        assertEquals("passwd", FileNameSanitizer.sanitize("/etc/passwd"))
+        assertEquals("etc passwd", FileNameSanitizer.sanitize("/etc/passwd"))
         assertEquals("a_b_c", FileNameSanitizer.sanitize("a:b:c"))
     }
 

@@ -58,7 +58,7 @@ class ChunkedHttpEngineTest {
         val dispatcher = RangeDispatcher(data)
         server.dispatcher = dispatcher
         val part = partFile()
-        val outcome = runBlocking {
+        val outcome = runBlocking<Unit> {
             engine().execute(
                 makeEntity(url(), threads = 4, chunkSizeBytes = 256L * 1024),
                 part,
@@ -80,7 +80,7 @@ class ChunkedHttpEngineTest {
         val dispatcher = RangeDispatcher(data, supportRanges = false)
         server.dispatcher = dispatcher
         val part = partFile()
-        val outcome = runBlocking {
+        val outcome = runBlocking<Unit> {
             engine().execute(
                 makeEntity(url(), threads = 4, chunkSizeBytes = 256L * 1024),
                 part,
@@ -115,7 +115,7 @@ class ChunkedHttpEngineTest {
             chunksEnc = "0-${256 * 1024 - 1}-${256 * 1024}",
             bytesDownloaded = 256L * 1024
         )
-        val outcome = runBlocking { engine().execute(entity, part, state, onProgress()) }
+        val outcome = runBlocking<Unit> { engine().execute(entity, part, state, onProgress()) }
         assertTrue(outcome is EngineOutcome.Success)
         assertArrayEquals(data, part.readBytes())
         // 3 remaining chunks of 256KB + probe skipped (chunks present)
@@ -135,7 +135,7 @@ class ChunkedHttpEngineTest {
             etag = "\"v1\""
             chunks = ChunkPlanForTest(data.size.toLong())
         }
-        val outcome = runBlocking {
+        val outcome = runBlocking<Unit> {
             engine().execute(
                 makeEntity(url(), bytesTotal = data.size.toLong(), acceptRanges = true, etag = "\"v1\""),
                 part,
@@ -154,7 +154,7 @@ class ChunkedHttpEngineTest {
         dispatcher.throttles = 2
         server.dispatcher = dispatcher
         val part = partFile()
-        val outcome = runBlocking {
+        val outcome = runBlocking<Unit> {
             engine().execute(
                 makeEntity(url(), threads = 4, chunkSizeBytes = 256L * 1024),
                 part,
@@ -174,7 +174,7 @@ class ChunkedHttpEngineTest {
         dispatcher.disconnects = 1
         server.dispatcher = dispatcher
         val part = partFile()
-        val outcome = runBlocking {
+        val outcome = runBlocking<Unit> {
             engine().execute(
                 makeEntity(url(), threads = 4, chunkSizeBytes = 256L * 1024),
                 part,
@@ -194,7 +194,7 @@ class ChunkedHttpEngineTest {
         server.enqueue(
             okhttp3.mockwebserver.MockResponse().setResponseCode(404)
         )
-        val outcome = runBlocking {
+        val outcome = runBlocking<Unit> {
             engine().execute(makeEntity(url()), partFile(), EngineState(), onProgress())
         }
         assertTrue(outcome is EngineOutcome.Fatal)
@@ -217,7 +217,7 @@ class ChunkedHttpEngineTest {
             }
         }
         val part = partFile()
-        val outcome = runBlocking {
+        val outcome = runBlocking<Unit> {
             engine().execute(
                 makeEntity(url(), threads = 4, chunkSizeBytes = 256L * 1024),
                 part,
@@ -235,14 +235,14 @@ class ChunkedHttpEngineTest {
         val dispatcher = RangeDispatcher(randomBytes(300 * 1024, seed = 21))
         dispatcher.disconnects = Int.MAX_VALUE
         server.dispatcher = dispatcher
-        val outcome = runBlocking {
+        val outcome = runBlocking<Unit> {
             engine().execute(
                 makeEntity(url(), retryBaseDelayMs = 1, retryMaxAttempts = 2),
                 partFile(), EngineState(), onProgress()
             )
         }
         assertTrue(outcome is EngineOutcome.Retryable)
-        assertTrue(sink.lines.any { it.contains("decision=fatal") || it.contains("attempts=2") })
+        assertTrue(sink.lines.any { it.contains("retry attempt=") || it.contains("terminal fail") })
     }
 }
 

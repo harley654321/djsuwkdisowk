@@ -61,6 +61,23 @@ internal class ChunkedHttpEngine internal constructor(
                 is HttpProbe.ProbeResult.Failure -> return@withContext p.outcome
             }
         } else {
+            // Reconcile the persisted snapshot against the freshly computed
+            // plan: a snapshot that does not span the whole file (crashed
+            // persist, schema change, truncated column) must never fake
+            // completeness -> we re-plan and merge known chunk progress.
+            if (state.acceptRanges && state.bytesTotal > 0) {
+                val plan = ChunkPlan.plan(state.bytesTotal, task.chunkSizeBytes, task.threads)
+                val saved = state.chunks.associateBy { it.start }
+                state.chunks = plan.map { p ->
+                    val s = saved[p.start]
+                    if (s != null && s.end == p.end) {
+                        s.copy(downloaded = s.downloaded.coerceIn(0L, p.length))
+                    } else {
+                        p
+                    }
+                }
+                log.i(TAG) { "resume reconciled task=${task.id} planChunks=${plan.size} savedChunks=${saved.size}" }
+            }
             log.i(TAG) { "resuming task=${task.id} chunks=${state.chunks.size} have=${task.bytesDownloaded} ranges=${state.acceptRanges}" }
         }
 

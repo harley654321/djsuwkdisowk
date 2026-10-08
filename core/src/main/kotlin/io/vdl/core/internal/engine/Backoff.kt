@@ -30,9 +30,15 @@ internal object Backoff {
 
     internal fun retryAfterMs(header: String?, nowEpochMs: Long = System.currentTimeMillis()): Long? {
         if (header.isNullOrBlank()) return null
-        return header.trim().toLongOrNull()?.let { nowEpochMs + it.coerceAtLeast(0L) - nowEpochMs }
-            ?: runCatching {
-                java.time.Instant.parse(header.trim()).toEpochMilli() - nowEpochMs
-            }.getOrNull()?.coerceAtLeast(0L)
+        val h = header.trim()
+        h.toLongOrNull()?.let { return it.coerceAtLeast(0L) }
+        // RFC 1123 HTTP-date, e.g. "Wed, 21 Oct 2099 07:28:00 GMT".
+        // SimpleDateFormat (API 1) avoids java.time's minSdk-26 requirement.
+        return runCatching {
+            val fmt = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", java.util.Locale.US)
+            fmt.timeZone = java.util.TimeZone.getTimeZone("GMT")
+            val at = fmt.parse(h)?.time ?: return null
+            at - nowEpochMs
+        }.getOrNull()?.coerceAtLeast(0L)
     }
 }

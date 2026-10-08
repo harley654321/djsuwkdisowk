@@ -3,11 +3,14 @@ package io.vdl.core
 /**
  * Filename sanitization, CWE-22 hardened.
  *
- * Rules (all verified by unit tests):
- * - strips path separators, traversal sequences and control characters
- * - collapses whitespace, trims dots from both ends (".hidden" -> "hidden")
- * - caps length at 120 chars (keeps suffix)
- * - never returns empty: falls back to "download.bin"
+ * Pipeline (verified by unit tests):
+ * 1. unify separators, then normalize the path with a stack: `..` pops the
+ *    previous kept segment (clamped at root) so traversal never escapes.
+ * 2. replace hostile characters: `:`, shell metachars (*?"<>|) and
+ *    control chars (<32, DEL) each become `_`.
+ * 3. collapse whitespace runs, trim, and strip dots from both ends.
+ * 4. cap at 120 chars preserving a short extension suffix.
+ * 5. never empty: falls back to "download.bin".
  */
 internal object FileNameSanitizer {
 
@@ -16,23 +19,37 @@ internal object FileNameSanitizer {
 
     internal fun sanitize(raw: String?): String {
         if (raw.isNullOrBlank()) return FALLBACK
-        var name = raw
-            .replace('\\', '/')
-            .substringAfterLast('/')
-            .replace("..", "")
-            .replace(':', '_')
-            .replace("*?\"<>|", "_")
-            .map { c -> if (c.code < 32 || c.code == 127) '_' else c }
-            .joinToString("")
-            .trim()
-            .trim('.')
-            .replace(Regex("\\s+"), " ")
-        if (name.length > MAX_LEN) {
-            val cut = name.take(MAX_LEN)
-            val dot = cut.lastIndexOf('.')
-            name = if (dot > 0) cut.substring(0, dot) + cut.substring(dot) else cut
+
+        // 1. traversal-safe stack normalization
+        val stack = ArrayDeque<String>()
+        raw.replace('\\', '/').split('/').forEach { seg ->
+            when {
+                seg.isEmpty() || seg == "." -> Unit
+                seg == ".." -> if (stack.isNotEmpty()) stack.removeLast()
+                else -> stack.addLast(seg)
+            }
         }
-        if (name.isBlank()) return FALLBACK
-        return name
+        var name = stack.joinToString(" ")
+
+        // 2. hostile characters
+        name = name.map { c ->
+            when {
+                c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' -> '_'
+                c.code < 32 || c.code == 127 -> '_'
+                else -> c
+            }
+        }.joinToString("")
+
+        // 3. whitespace + dots
+        name = name.replace(Regex("\\s+"), " ").trim().trim('.')
+
+        // 4. length cap keeping a short suffix
+        if (name.length > MAX_LEN) {
+            val lastDot = name.lastIndexOf('.')
+            val suffix = if (lastDot > 0 && name.length - lastDot in 1..10) name.substring(lastDot) else ""
+            val stem = if (suffix.isEmpty()) name else name.dropLast(suffix.length)
+            name = stem.take((MAX_LEN - suffix.length).coerceAtLeast(0)) + suffix
+        }
+        return name.ifBlank { FALLBACK }
     }
 }

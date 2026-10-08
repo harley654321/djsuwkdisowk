@@ -169,19 +169,19 @@ class QueueManagerTest {
         queue = it
     }
 
-    private fun submit(url: String, fileName: String, priority: String = "NORMAL"): String = runBlocking {
+    private fun submit(url: String, fileName: String, priority: String = "NORMAL"): String = runBlocking<Unit> {
         val q = queue!!
         val entity = makeEntity(url, fileName).copy(priority = priority)
         assertTrue(q.submit(entity))
         entity.id
     }
 
-    private fun stateOf(id: String): String? = runBlocking { repo.get(id)?.state }
+    private fun stateOf(id: String): String? = runBlocking<Unit> { repo.get(id)?.state }
 
-    private fun entityOf(id: String): DownloadTaskEntity? = runBlocking { repo.get(id) }
+    private fun entityOf(id: String): DownloadTaskEntity? = runBlocking<Unit> { repo.get(id) }
 
     @Test
-    fun dispatchesHighestPriorityFirst() = runBlocking {
+    fun dispatchesHighestPriorityFirst() = runBlocking<Unit> {
         engine.hang = true
         newQueue(maxParallel = 1)
         val low = submit("https://a/low", "low.bin", priority = "LOW")
@@ -198,7 +198,7 @@ class QueueManagerTest {
     }
 
     @Test
-    fun respectsParallelLimit() = runBlocking {
+    fun respectsParallelLimit() = runBlocking<Unit> {
         engine.hang = true
         newQueue(maxParallel = 2)
         val a = submit("https://a/1", "a.bin")
@@ -213,7 +213,7 @@ class QueueManagerTest {
     }
 
     @Test
-    fun pausePersistsChunksAndResumeCompletes() = runBlocking {
+    fun pausePersistsChunksAndResumeCompletes() = runBlocking<Unit> {
         engine.hang = true
         newQueue(maxParallel = 1)
         val id = submit("https://a/1", "video.mp4")
@@ -232,7 +232,7 @@ class QueueManagerTest {
     }
 
     @Test
-    fun duplicateRejected() = runBlocking {
+    fun duplicateRejected() = runBlocking<Unit> {
         newQueue(maxParallel = 3)
         val q = queue!!
         val first = makeEntity("https://a/1", "same.bin")
@@ -242,7 +242,7 @@ class QueueManagerTest {
     }
 
     @Test
-    fun retryableFailureMarksFailedTyped() = runBlocking {
+    fun retryableFailureMarksFailedTyped() = runBlocking<Unit> {
         engine.result = EngineOutcome.Retryable("boom", 503)
         newQueue(maxParallel = 3)
         val id = submit("https://a/1", "failing.bin")
@@ -254,7 +254,7 @@ class QueueManagerTest {
     }
 
     @Test
-    fun cancelRunningDeletesPart() = runBlocking {
+    fun cancelRunningDeletesPart() = runBlocking<Unit> {
         engine.hang = true
         newQueue(maxParallel = 1)
         val id = submit("https://a/1", "cancel.bin")
@@ -267,7 +267,7 @@ class QueueManagerTest {
     }
 
     @Test
-    fun insufficientSpaceFailsFastWhenSizeKnown() = runBlocking {
+    fun insufficientSpaceFailsFastWhenSizeKnown() = runBlocking<Unit> {
         engine.hang = true
         newQueue(maxParallel = 1, space = 100L)
         val occupier = submit("https://a/1", "occupier.bin")
@@ -283,7 +283,7 @@ class QueueManagerTest {
     }
 
     @Test
-    fun systemPauseBlocksDispatchUntilResumed() = runBlocking {
+    fun systemPauseBlocksDispatchUntilResumed() = runBlocking<Unit> {
         newQueue(maxParallel = 3)
         queue!!.setSystemPaused(true)
         val id = submit("https://a/1", "sys.bin")
@@ -294,7 +294,7 @@ class QueueManagerTest {
     }
 
     @Test
-    fun wifiOnlyDeferredUntilNetworkAllows() = runBlocking {
+    fun wifiOnlyDeferredUntilNetworkAllows() = runBlocking<Unit> {
         var allowed = false
         newQueue(maxParallel = 3, gate = NetworkGate { _ -> allowed })
         val id = submit("https://a/1", "wifi.bin")
@@ -307,7 +307,7 @@ class QueueManagerTest {
     }
 
     @Test
-    fun cancelAllCancelsRunningAndPending() = runBlocking {
+    fun cancelAllCancelsRunningAndPending() = runBlocking<Unit> {
         engine.hang = true
         newQueue(maxParallel = 2)
         val a = submit("https://a/1", "a.bin")
