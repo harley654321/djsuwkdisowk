@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal fun interface PartPublisher {
-    internal suspend fun publish(part: File, task: DownloadTaskEntity): PublishedResult
+    suspend fun publish(part: File, task: DownloadTaskEntity): PublishedResult
 }
 
 internal data class PublishedResult internal constructor(
@@ -39,32 +39,32 @@ internal data class PublishedResult internal constructor(
 )
 
 internal fun interface SpaceChecker {
-    internal fun availableBytes(): Long
+    fun availableBytes(): Long
 }
 
 internal fun interface NetworkGate {
-    internal fun canRunNow(task: DownloadTaskEntity): Boolean
+    fun canRunNow(task: DownloadTaskEntity): Boolean
 }
 
 internal interface PartFileFactory {
-    internal fun partFor(id: String, fileName: String): File
-    internal fun cleanup(id: String)
+    fun partFor(id: String, fileName: String): File
+    fun cleanup(id: String)
 }
 
 internal sealed interface QueueEvent {
-    internal data class Start(internal val id: String) : QueueEvent
-    internal data class Pause(internal val id: String) : QueueEvent
-    internal data class Resume(internal val id: String) : QueueEvent
-    internal data class Cancel(internal val id: String) : QueueEvent
-    internal object CancelAll : QueueEvent
-    internal object NetworkChanged : QueueEvent
-    internal data class EngineFinished(
+    data class Start(internal val id: String) : QueueEvent
+    data class Pause(internal val id: String) : QueueEvent
+    data class Resume(internal val id: String) : QueueEvent
+    data class Cancel(internal val id: String) : QueueEvent
+    object CancelAll : QueueEvent
+    object NetworkChanged : QueueEvent
+    data class EngineFinished(
         internal val id: String,
         internal val outcome: EngineOutcome?,
         internal val engineState: EngineState
     ) : QueueEvent
 
-    internal data class ProgressTick(
+    data class ProgressTick(
         internal val id: String,
         internal val progress: Progress
     ) : QueueEvent

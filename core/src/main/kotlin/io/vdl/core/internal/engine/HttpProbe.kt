@@ -15,15 +15,15 @@ internal class HttpProbe internal constructor(
     private val log: VdlLog
 ) {
 
-    internal sealed interface ProbeResult {
-        internal data class Info(
+    sealed interface ProbeResult {
+        data class Info(
             internal val bytesTotal: Long,
             internal val acceptRanges: Boolean,
             internal val etag: String?,
             internal val contentType: String?
         ) : ProbeResult
 
-        internal data class Failure(internal val outcome: EngineOutcome) : ProbeResult
+        data class Failure(internal val outcome: EngineOutcome) : ProbeResult
     }
 
     internal fun probe(task: DownloadTaskEntity): ProbeResult {

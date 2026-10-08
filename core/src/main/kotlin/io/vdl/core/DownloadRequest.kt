@@ -1,5 +1,6 @@
 package io.vdl.core
 
+import java.net.URLDecoder
 import java.net.URLEncoder
 
 /** Where the finished file ends up. */
@@ -114,7 +115,7 @@ public class DownloadRequestBuilder internal constructor() {
         }
 
         private fun urlDecode(s: String): String =
-            runCatching { URLEncoder.decode(s, "UTF-8") }.getOrDefault(s)
+            runCatching { URLDecoder.decode(s, "UTF-8") }.getOrDefault(s)
 
         private fun urlEncode(s: String): String = URLEncoder.encode(s, "UTF-8")
     }

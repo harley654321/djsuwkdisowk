@@ -194,7 +194,6 @@ internal class VdlEngine internal constructor(
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(20, TimeUnit.SECONDS)
-            .retryOnConnection(true)
         if (config.debugLogging) {
             b.addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
         }

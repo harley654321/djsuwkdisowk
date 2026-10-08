@@ -8,9 +8,9 @@ internal object RestartSignal {
 }
 
 internal sealed interface TransferResult {
-    internal data object Ok : TransferResult
-    internal object Restart : TransferResult
-    internal data class Fail(internal val outcome: EngineOutcome) : TransferResult
+    data object Ok : TransferResult
+    object Restart : TransferResult
+    data class Fail(internal val outcome: EngineOutcome) : TransferResult
 }
 
 /** Retryable HTTP condition (429/5xx) that may carry Retry-After. */

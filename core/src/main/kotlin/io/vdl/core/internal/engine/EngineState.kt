@@ -19,14 +19,14 @@ internal class EngineState internal constructor() {
 }
 
 internal sealed interface EngineOutcome {
-    internal data class Success(internal val bytesTotal: Long) : EngineOutcome
-    internal data class Retryable(internal val message: String, internal val httpCode: Int? = null) : EngineOutcome
-    internal data class Fatal(internal val message: String, internal val httpCode: Int? = null) : EngineOutcome
+    data class Success(internal val bytesTotal: Long) : EngineOutcome
+    data class Retryable(internal val message: String, internal val httpCode: Int? = null) : EngineOutcome
+    data class Fatal(internal val message: String, internal val httpCode: Int? = null) : EngineOutcome
 }
 
 /** Seam so the queue can be unit-tested with a scripted fake engine. */
 internal fun interface DownloadEngine {
-    internal suspend fun execute(
+    suspend fun execute(
         task: io.vdl.core.internal.db.DownloadTaskEntity,
         partFile: File,
         state: EngineState,

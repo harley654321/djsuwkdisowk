@@ -61,7 +61,7 @@ internal class ChunkedHttpEngine internal constructor(
                 is HttpProbe.ProbeResult.Failure -> return@withContext p.outcome
             }
         } else {
-            log.i(TAG) { "resuming task=${task.id} chunks=${state.chunks.size} have=${state.bytesDownloaded} ranges=${state.acceptRanges}" }
+            log.i(TAG) { "resuming task=${task.id} chunks=${state.chunks.size} have=${task.bytesDownloaded} ranges=${state.acceptRanges}" }
         }
 
         var restarted = false

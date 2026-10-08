@@ -17,9 +17,13 @@ internal class ChunkBoard internal constructor(
     private val addedSinceStart = java.util.concurrent.atomic.AtomicLong(0L)
     private val active = AtomicInteger(0)
 
-    internal fun startWorker(): Unit = active.incrementAndGet()
+    internal fun startWorker() {
+        active.incrementAndGet()
+    }
 
-    internal fun endWorker(): Unit = active.decrementAndGet()
+    internal fun endWorker() {
+        active.decrementAndGet()
+    }
 
     /** Register [bytes] written for chunk [index]. */
     internal fun add(index: Int, bytes: Long) {
