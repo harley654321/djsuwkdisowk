@@ -16,6 +16,8 @@ import io.vdl.core.internal.queue.SpaceChecker
 import io.vdl.core.internal.queue.NetworkGate
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,19 +38,28 @@ internal class InMemoryTaskRepository : TaskRepository {
     private val flow = MutableStateFlow<List<DownloadTaskEntity>>(emptyList())
     private val current: List<DownloadTaskEntity> get() = flow.value
 
-    override suspend fun add(task: DownloadTaskEntity): Boolean {
-        if (current.any { it.url == task.url && it.fileName == task.fileName }) return false
-        flow.value = current + task
-        return true
+    // Read-modify-write over flow.value MUST be mutually exclusive: the
+    // queue coroutine updates rows concurrently with test submits, and a
+    // stale-list write silently erases rows (observed as a 1-in-10 flake
+    // where a submitted task vanished from the repo).
+    private val mu = Mutex()
+
+    override suspend fun add(task: DownloadTaskEntity): Boolean = mu.withLock {
+        if (current.any { it.url == task.url && it.fileName == task.fileName }) {
+            false
+        } else {
+            flow.value = current + task
+            true
+        }
     }
 
-    override suspend fun update(task: DownloadTaskEntity) {
+    override suspend fun update(task: DownloadTaskEntity) = mu.withLock {
         flow.value = current.map { if (it.id == task.id) task else it }
     }
 
     override suspend fun get(id: String): DownloadTaskEntity? = current.firstOrNull { it.id == id }
 
-    override suspend fun delete(id: String) {
+    override suspend fun delete(id: String) = mu.withLock {
         flow.value = current.filterNot { it.id == id }
     }
 

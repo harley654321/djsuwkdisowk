@@ -11,9 +11,28 @@ public sealed interface Destination {
     /** App-private external files dir. No permissions, removed on uninstall. */
     public data class AppPrivate(public val subfolder: String? = null) : Destination
 
+    /**
+     * Gallery collections (Movies for video, Music for audio).
+     * MediaStore.Video/Audio + IS_PENDING on API 29+ (atomic, gallery
+     * apps only see the finished item), legacy public dir + media scan
+     * below.
+     */
+    public data class Gallery(public val subfolder: String? = null) : Destination
+
+    /**
+     * A user-picked SAF tree (ACTION_OPEN_DOCUMENT_TREE). The app must
+     * hold a persisted uri permission for [treeUri]. SAF writes are not
+     * transactional: the document becomes visible when the stream
+     * closes; a failure deletes the partial document.
+     */
+    public data class SafTree(public val treeUri: String) : Destination
+
     public companion object {
         internal fun fromStrings(type: String, subfolder: String?): Destination = when (type) {
             "PUBLIC_DOWNLOADS" -> PublicDownloads(subfolder)
+            "GALLERY" -> Gallery(subfolder)
+            // the subfolder column carries the tree uri for SAF
+            "SAF" -> SafTree(subfolder ?: "")
             else -> AppPrivate(subfolder)
         }
     }

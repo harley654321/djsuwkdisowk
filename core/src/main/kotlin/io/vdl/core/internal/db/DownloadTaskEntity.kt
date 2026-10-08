@@ -63,6 +63,9 @@ internal data class DownloadTaskEntity(
             val (type, sub) = when (dest) {
                 is Destination.PublicDownloads -> "PUBLIC_DOWNLOADS" to dest.subfolder
                 is Destination.AppPrivate -> "APP_PRIVATE" to dest.subfolder
+                is Destination.Gallery -> "GALLERY" to dest.subfolder
+                // the tree uri travels in the subfolder column
+                is Destination.SafTree -> "SAF" to dest.treeUri
             }
             return DownloadTaskEntity(
                 id = existingId ?: UUID.randomUUID().toString(),
