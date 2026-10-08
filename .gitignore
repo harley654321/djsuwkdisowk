@@ -1,0 +1,27 @@
+# Build outputs
+build/
+**/build/
+out/
+**/out/
+
+# Gradle
+.gradle/
+local.properties
+
+# IDE
+.idea/
+*.iml
+.navigation/
+captures/
+.kotlin/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Release signing / secrets (never commit)
+*.jks
+*.keystore
+secrets.properties
+
+# Room schemas are tracked (schemas/) - do not ignore
