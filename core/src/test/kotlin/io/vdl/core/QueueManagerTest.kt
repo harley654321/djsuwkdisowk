@@ -93,7 +93,7 @@ internal class InMemoryTaskRepository : TaskRepository {
 
 /** Scripted engine: hangs on a gate when asked, sets chunk state, returns a fixed outcome. */
 internal class FakeEngine : DownloadEngine {
-    internal val started = mutableListOf<String>()
+    internal val started = java.util.concurrent.CopyOnWriteArrayList<String>()
     internal var result: EngineOutcome = EngineOutcome.Success(1_000L)
     internal var hang = false
     internal val gate = CompletableDeferred<Unit>()
