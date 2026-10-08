@@ -83,6 +83,7 @@ internal class RunningTask internal constructor(
  */
 internal class QueueManager internal constructor(
     private val hlsEngine: DownloadEngine? = null,
+    private val dashEngine: DownloadEngine? = null,
     private val repository: TaskRepository,
     private val engine: DownloadEngine,
     private val partFactory: PartFileFactory,
@@ -341,15 +342,19 @@ internal class QueueManager internal constructor(
             contentType = entity.contentType
             chunks = ChunkCodec.decode(entity.chunksEnc)
         }
-        val engine = if (entity.kind == "HLS") hlsEngine else {
-            log.i(TAG) { "engine kind=DIRECT task=${entity.id}" }
-            this.engine
+        val engine = when (entity.kind) {
+            "HLS" -> hlsEngine
+            "DASH" -> dashEngine
+            else -> {
+                log.i(TAG) { "engine kind=DIRECT task=${entity.id}" }
+                this.engine
+            }
         }
         if (engine == null) {
             // Log BEFORE the observable mutation: observers awaiting FAILED
             // must find the evidence line already emitted.
-            log.e(TAG) { "dispatch task=${entity.id} reason=hls-engine-not-configured old=${entity.state} new=FAILED decision=fail-fast" }
-            repository.update(entity.withState(TaskState.FAILED, clockMs(), ErrorCodec.encode(DownloadError.InvalidRequest("HLS engine not configured"))))
+            log.e(TAG) { "dispatch task=${entity.id} reason=${entity.kind.lowercase()}-engine-not-configured old=${entity.state} new=FAILED decision=fail-fast" }
+            repository.update(entity.withState(TaskState.FAILED, clockMs(), ErrorCodec.encode(DownloadError.InvalidRequest("${entity.kind} engine not configured"))))
             return
         }
         val part = partFactory.partFor(entity.id, entity.fileName)

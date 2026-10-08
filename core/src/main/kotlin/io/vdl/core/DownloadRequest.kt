@@ -4,7 +4,7 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 
 /** Transport of a task. DIRECT = one chunkable file; HLS = m3u8 playlist. */
-public enum class DownloadKind { DIRECT, HLS }
+public enum class DownloadKind { DIRECT, HLS, DASH }
 
 /** Where the finished file ends up. */
 public sealed interface Destination {
@@ -108,6 +108,9 @@ public class DownloadRequestBuilder internal constructor() {
         }
         if (maxHeight != null) {
             require(maxHeight in 144..4320) { "maxHeight must be in 144..4320, got $maxHeight" }
+        }
+        require(kind == DownloadKind.DIRECT || kind == DownloadKind.HLS || kind == DownloadKind.DASH) {
+            "unknown kind $kind"
         }
         return DownloadRequest(
             url = trimmed,

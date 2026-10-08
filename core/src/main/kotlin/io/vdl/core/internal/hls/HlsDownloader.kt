@@ -2,7 +2,8 @@ package io.vdl.core.internal.hls
 
 import io.vdl.core.Progress
 import io.vdl.core.RetryPolicy
-import io.vdl.core.internal.engine.Backoff
+import io.vdl.core.internal.engine.FetchResult
+import io.vdl.core.internal.engine.RetryFetch
 import io.vdl.core.internal.logging.VdlLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -11,7 +12,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import java.io.RandomAccessFile
 
@@ -186,55 +186,22 @@ internal class HlsDownloader internal constructor(
 
     // ------------------------------------------------------------- fetch
 
+    /** Transport is the shared RetryFetch; failures map to typed outcomes. */
     private suspend fun fetchText(url: String, policy: RetryPolicy, what: String): Any =
-        fetchWithRetry(url, policy, what, null, null) { it.body.byteStream().readBytes().decodeToString() }
+        when (val r = RetryFetch(client, log, TAG, sleeper).text(url, policy, what)) {
+            is FetchResult.Text -> r.body
+            is FetchResult.Fatal -> HlsOutcome.Fatal(r.reason, r.httpCode)
+            is FetchResult.RetryableExhausted -> HlsOutcome.Retryable(r.reason)
+            is FetchResult.Bytes -> HlsOutcome.Fatal("unexpected bytes for text $what")
+        }
 
     private suspend fun fetchBytes(url: String, policy: RetryPolicy, what: String, offset: Long? = null, length: Long? = null): Any =
-        fetchWithRetry(url, policy, what, offset, length) { it.body.byteStream().readBytes() }
-
-    /** Returns String/ByteArray on success, or the typed [HlsOutcome] failure. */
-    private suspend fun fetchWithRetry(
-        url: String,
-        policy: RetryPolicy,
-        what: String,
-        offset: Long?,
-        length: Long?,
-        extract: (okhttp3.Response) -> Any
-    ): Any {
-        var attempt = 0
-        var lastReason = "unknown"
-        var retryAfterMs: Long? = null
-        while (true) {
-            val req = Request.Builder().url(url).apply {
-                if (offset != null || length != null) {
-                    val to = if (length != null) (offset ?: 0L) + length - 1 else null
-                    header("Range", "bytes=${offset ?: 0L}-${to ?: ""}")
-                }
-            }.build()
-            client.newCall(req).execute().use { resp ->
-                when {
-                    resp.code == 200 || (resp.code == 206 && offset != null) -> {
-                        return extract(resp)
-                    }
-                    resp.code == 429 || resp.code in 500..599 -> {
-                        retryAfterMs = Backoff.retryAfterMs(resp.header("Retry-After"))
-                        lastReason = "http ${resp.code}"
-                        log.w(TAG) { "fetch throttle what=$what attempt=$attempt code=${resp.code} url=$url retryAfter=${retryAfterMs ?: "-"}" }
-                    }
-                    else -> {
-                        log.e(TAG) { "fetch fatal what=$what code=${resp.code} url=$url decision=fatal" }
-                        return HlsOutcome.Fatal("http ${resp.code} fetching $what", resp.code)
-                    }
-                }
-            }
-            attempt++
-            if (attempt >= policy.maxAttempts) {
-                log.e(TAG) { "fetch giveup what=$what attempts=$attempt reason=$lastReason url=$url" }
-                return HlsOutcome.Retryable("$what attempts=$attempt: $lastReason")
-            }
-            sleeper(Backoff.delayMs(policy, attempt, retryAfterMs))
+        when (val r = RetryFetch(client, log, TAG, sleeper).bytes(url, policy, what, offset, length)) {
+            is FetchResult.Bytes -> r.body
+            is FetchResult.Fatal -> HlsOutcome.Fatal(r.reason, r.httpCode)
+            is FetchResult.RetryableExhausted -> HlsOutcome.Retryable(r.reason)
+            is FetchResult.Text -> HlsOutcome.Fatal("unexpected text for bytes $what")
         }
-    }
 
     private fun elapsedMs(t0: Long): Long = (clockNanos() - t0) / 1_000_000L
 
