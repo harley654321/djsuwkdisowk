@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
+    `maven-publish`
 }
 
 android {
@@ -62,17 +63,14 @@ dependencies {
     testImplementation(libs.mockwebserver)
 }
 
-afterEvaluate {
-    apply(plugin = "maven-publish")
-
-    configure<org.gradle.api.publish.PublishingExtension> {
-        publications {
-            register<MavenPublication>("release") {
-                groupId = "io.vdl"
-                artifactId = "core"
-                version = "0.1.0"
-                from(components["release"])
-            }
+// AGP 8: the release component exists after evaluation, hence afterEvaluate here.
+publishing {
+    publications {
+        register<MavenPublication>("release") {
+            groupId = "io.vdl"
+            artifactId = "core"
+            version = "0.1.0"
+            afterEvaluate { from(components["release"]) }
         }
     }
 }
