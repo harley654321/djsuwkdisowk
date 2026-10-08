@@ -37,13 +37,10 @@ android {
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-    }
-}
-
-// Explicit API governs the shipped ABI (main source set) only, not tests.
-listOf("compileReleaseKotlin", "compileDebugKotlin").forEach { name ->
-    tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>(name).configure {
-        compilerOptions { freeCompilerArgs.add("-Xexplicit-api=strict") }
+        // Explicit API governs the shipped ABI (main source set) only, not tests.
+        if (name == "compileReleaseKotlin" || name == "compileDebugKotlin") {
+            freeCompilerArgs.add("-Xexplicit-api=strict")
+        }
     }
 }
 
