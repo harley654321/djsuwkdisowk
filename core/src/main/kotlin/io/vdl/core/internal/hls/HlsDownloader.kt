@@ -6,13 +6,13 @@ import io.vdl.core.internal.engine.Backoff
 import io.vdl.core.internal.logging.VdlLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
-import java.io.IOException
 import java.io.RandomAccessFile
 
 /** Typed orchestrator outcome; no string parsing downstream. */
@@ -21,7 +21,10 @@ internal sealed interface HlsOutcome {
         val bytesWritten: Long,
         val units: Int,
         val durationSec: Double,
-        val variant: String
+        val variant: String,
+        val audioBytesWritten: Long = 0L,
+        val audioUnits: Int = 0,
+        val hasSeparateAudio: Boolean = false
     ) : HlsOutcome
     data class Fatal(val reason: String, val httpCode: Int? = null) : HlsOutcome
     data class Retryable(val reason: String) : HlsOutcome
@@ -32,9 +35,11 @@ internal sealed interface HlsOutcome {
  * -> sequential unit download (retry per unit) -> AES-128 decrypt ->
  * ordered concat (fMP4: init + segments; TS: segments) into [out].
  *
- * Audio renditions are selected by [HlsVariantSelector] but downloaded as
- * a separate stream only in a later increment; muxing into one MP4 needs
- * a remux, which this library does without transcode at a later stage.
+ * When the master selects a separate AUDIO rendition and [audioOut] is
+ * provided, the audio track is downloaded to its own file after the video
+ * track (sequential by design: video is the big payload; both tracks are
+ * independently playable fMP4/TS files). Muxing both into a single MP4 is
+ * a later, atom-level stage; no transcode ever happens.
  */
 internal class HlsDownloader internal constructor(
     private val client: OkHttpClient,
@@ -49,37 +54,87 @@ internal class HlsDownloader internal constructor(
         out: File,
         maxHeight: Int? = null,
         policy: RetryPolicy,
+        audioOut: File? = null,
         onProgress: (Progress) -> Unit
     ): HlsOutcome = withContext(Dispatchers.IO) {
         val t0 = clockNanos()
 
-        // 1. resolve master -> media playlist URL
+        // 1. resolve master -> video media playlist (+ optional audio rendition)
+        var audioUrl: String? = null
+        var audioLabel: String? = null
         val (mediaUrl, variantLabel) = when (val masterText = fetchText(playlistUrl, policy, "master")) {
             is String ->
                 when (val p = parser.parse(masterText, playlistUrl)) {
                     is MasterPlaylist -> {
                         val sel = HlsVariantSelector.select(p, maxHeight, log)
+                        sel.audio?.let {
+                            audioUrl = it.uri
+                            audioLabel = it.name
+                        }
                         sel.video.uri to "${sel.video.resolutionHeight ?: "?"}p/${sel.video.averageBandwidth ?: sel.video.bandwidth}bps"
                     }
                     is MediaPlaylist -> playlistUrl to "direct-media"
                 }
             else -> return@withContext masterText as HlsOutcome
         }
-        log.i(TAG) { "variant resolved url=$mediaUrl variant=$variantLabel src=$playlistUrl" }
+        log.i(TAG) { "variant resolved url=$mediaUrl variant=$variantLabel audio=${audioLabel ?: "muxed"} src=$playlistUrl" }
 
-        // 2. media playlist -> ordered units
-        val mediaText = when (val t = fetchText(mediaUrl, policy, "media")) {
+        // 2. video track
+        val video = when (val v = runMedia(mediaUrl, out, policy, "video", t0, onProgress)) {
+            is Track -> v
+            else -> return@withContext v as HlsOutcome
+        }
+
+        // 3. audio track (separate rendition), after video completes
+        var audio: Track? = null
+        if (audioUrl != null && audioOut != null) {
+            audio = when (val a = runMedia(audioUrl!!, audioOut, policy, "audio", t0, onProgress)) {
+                is Track -> a
+                else -> return@withContext a as HlsOutcome
+            }
+        } else if (audioUrl != null && audioOut == null) {
+            log.w(TAG) { "audio rendition present but no audioOut decision=skip audio=$audioLabel" }
+        }
+
+        log.i(TAG) {
+            "hls done units=${video.units}+${audio?.units ?: 0} bytes=${video.bytes}+${audio?.bytes ?: 0} dt=${elapsedMs(t0)}ms out=${out.name} audio=${audioOut?.name ?: "-"}"
+        }
+        HlsOutcome.Success(
+            bytesWritten = video.bytes,
+            units = video.units,
+            durationSec = video.durationSec,
+            variant = variantLabel,
+            audioBytesWritten = audio?.bytes ?: 0L,
+            audioUnits = audio?.units ?: 0,
+            hasSeparateAudio = audio != null
+        )
+    }
+
+    // ------------------------------------------------------- track runner
+
+    private class Track(val bytes: Long, val units: Int, val durationSec: Double)
+
+    /** Fetch one media playlist and stream its units into [out]. */
+    private suspend fun runMedia(
+        mediaUrl: String,
+        out: File,
+        policy: RetryPolicy,
+        kind: String,
+        t0: Long,
+        onProgress: (Progress) -> Unit
+    ): Any {
+        val mediaText = when (val t = fetchText(mediaUrl, policy, "$kind-media")) {
             is String -> t
-            else -> return@withContext t as HlsOutcome
+            else -> return t as HlsOutcome
         }
         val media = parser.parse(mediaText, mediaUrl) as MediaPlaylist
         if (media.isLive) {
-            log.w(TAG) { "live playlist detected url=$mediaUrl decision=download-current-window" }
+            log.w(TAG) { "live playlist detected kind=$kind url=$mediaUrl decision=download-current-window" }
         }
         val units = HlsPlan.build(media)
-        log.i(TAG) { "plan built units=${units.size} duration=${media.totalDurationSec}s key=${units.firstOrNull()?.keyMethod ?: "none"}" }
+        log.i(TAG) { "plan built kind=$kind units=${units.size} duration=${media.totalDurationSec}s key=${units.firstOrNull()?.keyMethod ?: "none"}" }
 
-        // 3. fetch keys once per URL
+        // keys once per URL
         val keys = HashMap<String, ByteArray>()
         for (unit in units) {
             val keyUrl = unit.keyUrl ?: continue
@@ -88,22 +143,20 @@ internal class HlsDownloader internal constructor(
                     is ByteArray -> {
                         if (k.size != 16) {
                             log.e(TAG) { "key size != 16 url=$keyUrl size=${k.size} decision=fatal" }
-                            return@withContext HlsOutcome.Fatal("AES key must be 16 bytes, got ${k.size}")
+                            return HlsOutcome.Fatal("AES key must be 16 bytes, got ${k.size}")
                         }
                         keys[keyUrl] = k
                     }
-                    else -> return@withContext k as HlsOutcome
+                    else -> return k as HlsOutcome
                 }
             }
         }
 
-        // 4. sequential download/decrypt/append with per-unit progress
-        val totalBytes = units.size.coerceAtLeast(1).toLong()
         var written = 0L
         RandomAccessFile(out, "rw").use { sink ->
             sink.setLength(0L)
             for (unit in units) {
-                if (!isActive) throw CancellationException("hls download cancelled at unit ${unit.index}")
+                if (!currentCoroutineContext().isActive) throw CancellationException("hls $kind download cancelled at unit ${unit.index}")
                 when (val bytes = fetchBytes(unit.url, policy, "unit", unit.byterangeOffset, unit.byterangeLength)) {
                     is ByteArray -> {
                         val plain = if (unit.keyMethod != null && unit.keyUrl != null) {
@@ -112,25 +165,23 @@ internal class HlsDownloader internal constructor(
                         sink.seek(written)
                         sink.write(plain)
                         written += plain.size
-                        log.d(TAG) { "unit done idx=${unit.index} bytes=${plain.size} total=$written dt=${elapsedMs(t0)}ms" }
+                        log.d(TAG) { "unit done kind=$kind idx=${unit.index} bytes=${plain.size} total=$written dt=${elapsedMs(t0)}ms" }
                         onProgress(
                             Progress(
                                 bytesDownloaded = written,
-                                bytesTotal = totalBytes, // unit-count based
+                                bytesTotal = units.size.coerceAtLeast(1).toLong(), // unit-count based
                                 speedBps = 0L,
                                 etaMs = 0L,
                                 activeThreads = 1
                             )
                         )
                     }
-                    else -> return@withContext bytes as HlsOutcome
+                    else -> return bytes as HlsOutcome
                 }
             }
         }
-        log.i(TAG) {
-            "hls done units=${units.size} bytes=$written duration=${media.totalDurationSec}s dt=${elapsedMs(t0)}ms out=${out.name}"
-        }
-        HlsOutcome.Success(written, units.size, media.totalDurationSec, variantLabel)
+        log.i(TAG) { "track done kind=$kind units=${units.size} bytes=$written duration=${media.totalDurationSec}s dt=${elapsedMs(t0)}ms out=${out.name}" }
+        return Track(written, units.size, media.totalDurationSec)
     }
 
     // ------------------------------------------------------------- fetch

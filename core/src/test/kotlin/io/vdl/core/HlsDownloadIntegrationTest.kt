@@ -365,3 +365,198 @@ class HlsDownloadIntegrationTest {
         assertArrayEquals(slice1 + slice2, out.readBytes())
     }
 }
+
+// -------------------------------------------- separate audio rendition track
+
+class HlsAudioTrackIntegrationTest {
+
+    private lateinit var server: MockWebServer
+    private val client = OkHttpClient()
+    private lateinit var tmp: File
+    private val sink = PrintSink()
+
+    @Before
+    fun setUp() {
+        server = MockWebServer()
+        server.start()
+        tmp = Files.createTempDirectory("vdl-hls-audio").toFile()
+    }
+
+    @After
+    fun tearDown() {
+        server.close()
+        tmp.deleteRecursively()
+    }
+
+    private fun downloader(): HlsDownloader = HlsDownloader(
+        client = client,
+        log = testLog(sink),
+        sleeper = { _ -> }
+    )
+
+    private fun url(path: String): String = server.url(path).toString()
+
+    private fun policy(): RetryPolicy =
+        RetryPolicy.Exponential(baseDelayMs = 5L, maxAttempts = 4, maxDelayMs = 20L)
+
+    @Test
+    fun separateAudioRenditionDownloadsBothTracksByteForByte() {
+        val videoKey = randomBytes(16, seed = 61)
+        val audioKey = randomBytes(16, seed = 62)
+        val vInit = randomBytes(700, seed = 63)
+        val v1 = randomBytes(30_000, seed = 64)
+        val v2 = randomBytes(31_000, seed = 65)
+        val aInit = randomBytes(400, seed = 66)
+        val a1 = randomBytes(9_000, seed = 67)
+        val a2 = randomBytes(9_500, seed = 68)
+
+        // different IVs per track, explicit hex
+        val vIv = ByteArray(16) { (it + 1).toByte() }
+        val aIv = ByteArray(16) { (it + 101).toByte() }
+        val (cv1, cv2) = listOf(v1, v2).map { Aes128.encrypt(it, videoKey, vIv) }
+        val (ca1, ca2) = listOf(a1, a2).map { Aes128.encrypt(it, audioKey, aIv) }
+        fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
+
+        val master = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="2",URI="audio.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720,AUDIO="aud"
+            video.m3u8
+        """.trimIndent()
+        val videoPl = """
+            #EXTM3U
+            #EXT-X-TARGETDURATION:4
+            #EXT-X-KEY:METHOD=AES-128,URI="vkey.bin",IV=0x${hex(vIv)}
+            #EXT-X-MAP:URI="vinit.mp4"
+            #EXTINF:4.0,
+            vseg1.m4s
+            #EXTINF:4.0,
+            vseg2.m4s
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        val audioPl = """
+            #EXTM3U
+            #EXT-X-TARGETDURATION:4
+            #EXT-X-KEY:METHOD=AES-128,URI="akey.bin",IV=0x${hex(aIv)}
+            #EXT-X-MAP:URI="ainit.mp4"
+            #EXTINF:4.0,
+            aseg1.m4s
+            #EXTINF:4.0,
+            aseg2.m4s
+            #EXT-X-ENDLIST
+        """.trimIndent()
+
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                return when (request.url.encodedPath) {
+                    "/master.m3u8" -> MockResponse.Builder().code(200).body(Buffer().writeUtf8(master)).build()
+                    "/video.m3u8" -> MockResponse.Builder().code(200).body(Buffer().writeUtf8(videoPl)).build()
+                    "/audio.m3u8" -> MockResponse.Builder().code(200).body(Buffer().writeUtf8(audioPl)).build()
+                    "/vkey.bin" -> MockResponse.Builder().code(200).body(Buffer().write(videoKey)).build()
+                    "/akey.bin" -> MockResponse.Builder().code(200).body(Buffer().write(audioKey)).build()
+                    "/vinit.mp4" -> MockResponse.Builder().code(200).body(Buffer().write(vInit)).build()
+                    "/vseg1.m4s" -> MockResponse.Builder().code(200).body(Buffer().write(cv1)).build()
+                    "/vseg2.m4s" -> MockResponse.Builder().code(200).body(Buffer().write(cv2)).build()
+                    "/ainit.mp4" -> MockResponse.Builder().code(200).body(Buffer().write(aInit)).build()
+                    "/aseg1.m4s" -> MockResponse.Builder().code(200).body(Buffer().write(ca1)).build()
+                    "/aseg2.m4s" -> MockResponse.Builder().code(200).body(Buffer().write(ca2)).build()
+                    else -> MockResponse.Builder().code(404).build()
+                }
+            }
+        }
+
+        val video = File(tmp, "video.mp4")
+        val audio = File(tmp, "audio.mp4")
+        val result = kotlinx.coroutines.runBlocking {
+            downloader().download(url("/master.m3u8"), video, policy = policy(), onProgress = { }, audioOut = audio)
+        }
+        assertTrue("expected success but was $result", result is HlsOutcome.Success)
+        val s = result as HlsOutcome.Success
+        // video: init is ENCRYPTED under the same key (RFC 8216: MAP shares key)
+        assertArrayEquals(Aes128.decrypt(vInit, videoKey, vIv) + v1 + v2, video.readBytes())
+        assertArrayEquals(Aes128.decrypt(aInit, audioKey, aIv) + a1 + a2, audio.readBytes())
+        assertEquals(3, s.units)          // vinit + 2 segments
+        assertEquals(3, s.audioUnits)    // ainit + 2 segments
+        assertTrue(s.hasSeparateAudio)
+        assertEquals((vInit + v1 + v2).size.toLong(), s.bytesWritten)
+        assertEquals((aInit + a1 + a2).size.toLong(), s.audioBytesWritten)
+        // evidence: both tracks logged with kind=, audio decision present
+        assertTrue(sink.lines.any { it.contains("variant resolved") && it.contains("audio=English") })
+        assertTrue(sink.lines.any { it.contains("track done kind=video") })
+        assertTrue(sink.lines.any { it.contains("track done kind=audio") })
+    }
+
+    @Test
+    fun audioRenditionWithoutAudioOutIsSkippedWithWarning() {
+        val media = """
+            #EXTM3U
+            #EXT-X-TARGETDURATION:2
+            #EXTINF:2.0,
+            seg.ts
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        val master = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",DEFAULT=YES,URI="audio.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=1280x720,AUDIO="aud"
+            media.m3u8
+        """.trimIndent()
+        val seg = randomBytes(4_096, seed = 71)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                return when (request.url.encodedPath) {
+                    "/master.m3u8" -> MockResponse.Builder().code(200).body(Buffer().writeUtf8(master)).build()
+                    "/media.m3u8" -> MockResponse.Builder().code(200).body(Buffer().writeUtf8(media)).build()
+                    "/seg.ts" -> MockResponse.Builder().code(200).body(Buffer().write(seg)).build()
+                    else -> MockResponse.Builder().code(404).build()
+                }
+            }
+        }
+        val video = File(tmp, "video.ts")
+        val result = kotlinx.coroutines.runBlocking {
+            downloader().download(url("/master.m3u8"), video, policy = policy(), onProgress = { })
+        }
+        assertTrue(result is HlsOutcome.Success)
+        val s = result as HlsOutcome.Success
+        assertTrue(!s.hasSeparateAudio)
+        assertEquals(0, s.audioUnits)
+        assertTrue(sink.lines.any { it.contains("no audioOut decision=skip") })
+    }
+
+    @Test
+    fun audioPlaylistFetchFailureIsFatalAfterVideoSucceeded() {
+        val videoPl = """
+            #EXTM3U
+            #EXT-X-TARGETDURATION:2
+            #EXTINF:2.0,
+            seg.ts
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        val master = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",DEFAULT=YES,URI="audio.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=1280x720,AUDIO="aud"
+            video.m3u8
+        """.trimIndent()
+        val seg = randomBytes(4_096, seed = 81)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                return when (request.url.encodedPath) {
+                    "/master.m3u8" -> MockResponse.Builder().code(200).body(Buffer().writeUtf8(master)).build()
+                    "/video.m3u8" -> MockResponse.Builder().code(200).body(Buffer().writeUtf8(videoPl)).build()
+                    "/seg.ts" -> MockResponse.Builder().code(200).body(Buffer().write(seg)).build()
+                    else -> MockResponse.Builder().code(404).build() // audio.m3u8 404
+                }
+            }
+        }
+        val video = File(tmp, "video.ts")
+        val audio = File(tmp, "audio.mp4")
+        val result = kotlinx.coroutines.runBlocking {
+            downloader().download(url("/master.m3u8"), video, policy = policy(), onProgress = { }, audioOut = audio)
+        }
+        // audio fetch failed: the whole outcome is fatal, video file remains but is not reported
+        assertTrue("expected fatal but was $result", result is HlsOutcome.Fatal)
+        assertEquals(404, (result as HlsOutcome.Fatal).httpCode)
+        assertTrue(sink.lines.any { it.contains("fetch fatal") && it.contains("audio-media") })
+    }
+}
