@@ -39,9 +39,13 @@ internal class AndroidPartFileFactory internal constructor(
     }
 
     override fun cleanup(id: String) {
-        val f = File(dir, "$id.part")
-        if (f.exists() && !f.delete()) {
-            // logged by caller context is unavailable here; best effort delete
+        // "<id>.*": the DIRECT part file plus HLS scratch (<id>.audio, <id>.muxed).
+        val leftovers = dir.listFiles { f -> f.name == "$id.part" || (f.name.startsWith("$id.") && f.name.length > id.length + 4) }
+        leftovers?.forEach { f ->
+            if (!f.delete()) {
+                // best effort: nothing here can fail the caller; a stale
+                // scratch file only costs cache space until the next cleanup.
+            }
         }
     }
 }

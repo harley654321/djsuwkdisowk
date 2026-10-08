@@ -82,6 +82,7 @@ internal class RunningTask internal constructor(
  * coroutines only append progress/finish events.
  */
 internal class QueueManager internal constructor(
+    private val hlsEngine: DownloadEngine? = null,
     private val repository: TaskRepository,
     private val engine: DownloadEngine,
     private val partFactory: PartFileFactory,
@@ -340,9 +341,20 @@ internal class QueueManager internal constructor(
             contentType = entity.contentType
             chunks = ChunkCodec.decode(entity.chunksEnc)
         }
+        val engine = if (entity.kind == "HLS") hlsEngine else {
+            log.i(TAG) { "engine kind=DIRECT task=${entity.id}" }
+            this.engine
+        }
+        if (engine == null) {
+            // Log BEFORE the observable mutation: observers awaiting FAILED
+            // must find the evidence line already emitted.
+            log.e(TAG) { "dispatch task=${entity.id} reason=hls-engine-not-configured old=${entity.state} new=FAILED decision=fail-fast" }
+            repository.update(entity.withState(TaskState.FAILED, clockMs(), ErrorCodec.encode(DownloadError.InvalidRequest("HLS engine not configured"))))
+            return
+        }
         val part = partFactory.partFor(entity.id, entity.fileName)
         val startedAt = clockMs()
-        log.i(TAG) { "engine start task=${entity.id} url=${entity.url} resumeChunks=${es.chunks.size} have=${entity.bytesDownloaded}" }
+        log.i(TAG) { "engine start task=${entity.id} kind=${entity.kind} url=${entity.url} resumeChunks=${es.chunks.size} have=${entity.bytesDownloaded}" }
         // LAZY: guarantees running[] is populated before the engine can
         // emit EngineFinished, otherwise an instant engine would no-op.
         val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {

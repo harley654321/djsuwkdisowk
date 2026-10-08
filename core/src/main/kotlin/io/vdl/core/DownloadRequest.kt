@@ -3,6 +3,9 @@ package io.vdl.core
 import java.net.URLDecoder
 import java.net.URLEncoder
 
+/** Transport of a task. DIRECT = one chunkable file; HLS = m3u8 playlist. */
+public enum class DownloadKind { DIRECT, HLS }
+
 /** Where the finished file ends up. */
 public sealed interface Destination {
     /** Public Downloads folder. MediaStore + IS_PENDING on API 29+, legacy path below. */
@@ -64,6 +67,8 @@ public sealed interface RetryPolicy {
 internal class DownloadRequest internal constructor(
     val url: String,
     val fileName: String,
+    val kind: DownloadKind,
+    val maxHeight: Int?,
     val destination: Destination,
     val priority: Priority,
     val wifiOnly: Boolean,
@@ -79,6 +84,10 @@ public class DownloadRequestBuilder internal constructor() {
     public var url: String = ""
     public var fileName: String? = null
     public var destination: Destination = Destination.AppPrivate()
+    /** HLS only; null = best variant the selector offers. */
+    public var kind: DownloadKind = DownloadKind.DIRECT
+    /** HLS only: cap variant resolution height (e.g. 720). */
+    public var maxHeight: Int? = null
     public var priority: Priority = Priority.NORMAL
     public var wifiOnly: Boolean = false
     public var showNotification: Boolean = true
@@ -97,9 +106,14 @@ public class DownloadRequestBuilder internal constructor() {
         require(headers.keys.none { it.equals("Range", ignoreCase = true) }) {
             "Range header is managed by the engine and cannot be set manually"
         }
+        if (maxHeight != null) {
+            require(maxHeight in 144..4320) { "maxHeight must be in 144..4320, got $maxHeight" }
+        }
         return DownloadRequest(
             url = trimmed,
             fileName = fileName ?: fileNameFromUrl(trimmed),
+            kind = kind,
+            maxHeight = maxHeight,
             destination = destination,
             priority = priority,
             wifiOnly = wifiOnly,

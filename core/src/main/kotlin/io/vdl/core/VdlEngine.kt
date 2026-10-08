@@ -12,6 +12,7 @@ import io.vdl.core.internal.db.RoomTaskRepository
 import io.vdl.core.internal.db.TaskState
 import io.vdl.core.internal.db.VdlDatabase
 import io.vdl.core.internal.engine.ChunkedHttpEngine
+import io.vdl.core.internal.hls.HlsQueueEngine
 import io.vdl.core.internal.logging.VdlLog
 import io.vdl.core.internal.net.NetworkMonitor
 import io.vdl.core.internal.queue.QueueManager
@@ -55,6 +56,7 @@ internal class VdlEngine internal constructor(
     private val client = buildClient()
     private val networkMonitor = NetworkMonitor(appContext, log)
     internal val queue = QueueManager(
+        hlsEngine = HlsQueueEngine(client, log),
         repository = repository,
         engine = ChunkedHttpEngine(client, log, config.progressIntervalMs),
         partFactory = AndroidPartFileFactory(appContext),
