@@ -194,7 +194,9 @@ class ChunkedHttpEngineTest {
         server.enqueue(
             okhttp3.mockwebserver.MockResponse().setResponseCode(404)
         )
-        val outcome = run(makeEntity(url()))
+        val outcome = runBlocking {
+            engine().execute(makeEntity(url()), partFile(), EngineState(), onProgress())
+        }
         assertTrue(outcome is EngineOutcome.Fatal)
         assertEquals(404, (outcome as EngineOutcome.Fatal).httpCode)
     }
@@ -233,13 +235,16 @@ class ChunkedHttpEngineTest {
         val dispatcher = RangeDispatcher(randomBytes(300 * 1024, seed = 21))
         dispatcher.disconnects = Int.MAX_VALUE
         server.dispatcher = dispatcher
-        val outcome = run(
-            makeEntity(url(), retryBaseDelayMs = 1, retryMaxAttempts = 2)
-        )
+        val outcome = runBlocking {
+            engine().execute(
+                makeEntity(url(), retryBaseDelayMs = 1, retryMaxAttempts = 2),
+                partFile(), EngineState(), onProgress()
+            )
+        }
         assertTrue(outcome is EngineOutcome.Retryable)
         assertTrue(sink.lines.any { it.contains("decision=fatal") || it.contains("attempts=2") })
     }
 }
 
-internal fun ChunkPlanForTest(total: Long): List<ChunkProgress> =
+internal fun ChunkPlanForTest(total: Long) =
     io.vdl.core.internal.engine.ChunkPlan.plan(total, 256L * 1024, 4)
