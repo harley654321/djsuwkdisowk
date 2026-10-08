@@ -36,41 +36,41 @@ internal class InMemoryTaskRepository : TaskRepository {
     private val flow = MutableStateFlow<List<DownloadTaskEntity>>(emptyList())
     private val current: List<DownloadTaskEntity> get() = flow.value
 
-    internal override suspend fun add(task: DownloadTaskEntity): Boolean {
+    override suspend fun add(task: DownloadTaskEntity): Boolean {
         if (current.any { it.url == task.url && it.fileName == task.fileName }) return false
         flow.value = current + task
         return true
     }
 
-    internal override suspend fun update(task: DownloadTaskEntity) {
+    override suspend fun update(task: DownloadTaskEntity) {
         flow.value = current.map { if (it.id == task.id) task else it }
     }
 
-    internal override suspend fun get(id: String): DownloadTaskEntity? = current.firstOrNull { it.id == id }
+    override suspend fun get(id: String): DownloadTaskEntity? = current.firstOrNull { it.id == id }
 
-    internal override suspend fun delete(id: String) {
+    override suspend fun delete(id: String) {
         flow.value = current.filterNot { it.id == id }
     }
 
-    internal override suspend fun clearCompleted(): Int {
+    override suspend fun clearCompleted(): Int {
         val done = current.filter { it.state == TaskState.COMPLETED.name }
         flow.value = current - done.toSet()
         return done.size
     }
 
-    internal override fun observe(id: String): Flow<DownloadTaskEntity?> =
+    override fun observe(id: String): Flow<DownloadTaskEntity?> =
         flow.map { list -> list.firstOrNull { it.id == id } }.distinctUntilChanged()
 
-    internal override fun observeAll(): Flow<List<DownloadTaskEntity>> = flow.asStateFlow()
+    override fun observeAll(): Flow<List<DownloadTaskEntity>> = flow.asStateFlow()
 
-    internal override suspend fun pendingOrdered(): List<DownloadTaskEntity> =
+    override suspend fun pendingOrdered(): List<DownloadTaskEntity> =
         current.filter { it.state == TaskState.PENDING.name }
             .sortedWith(compareBy({ priorityRank(it.priority) }, { it.createdAt }))
 
-    internal override suspend fun runningOrphans(): List<DownloadTaskEntity> =
+    override suspend fun runningOrphans(): List<DownloadTaskEntity> =
         current.filter { it.state == TaskState.RUNNING.name }
 
-    internal override suspend fun activeTasks(): List<DownloadTaskEntity> =
+    override suspend fun activeTasks(): List<DownloadTaskEntity> =
         current.filter { it.state != TaskState.COMPLETED.name && it.state != TaskState.CANCELLED.name }
 
     private fun priorityRank(raw: String): Int = when (raw) {
@@ -87,7 +87,7 @@ internal class FakeEngine : DownloadEngine {
     internal var hang = false
     internal val gate = CompletableDeferred<Unit>()
 
-    internal override suspend fun execute(
+    override suspend fun execute(
         task: DownloadTaskEntity,
         partFile: File,
         state: EngineState,
@@ -112,14 +112,14 @@ internal class FakeEngine : DownloadEngine {
 internal class FakeFactory(private val dir: File) : PartFileFactory {
     internal val created = mutableSetOf<String>()
 
-    internal override fun partFor(id: String, fileName: String): File {
+    override fun partFor(id: String, fileName: String): File {
         created += id
         val f = File(dir, "$id.part")
         if (!f.exists()) f.createNewFile()
         return f
     }
 
-    internal override fun cleanup(id: String) {
+    override fun cleanup(id: String) {
         File(dir, "$id.part").delete()
     }
 }
