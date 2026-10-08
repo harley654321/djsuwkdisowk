@@ -169,16 +169,16 @@ class QueueManagerTest {
         queue = it
     }
 
-    private fun submit(url: String, fileName: String, priority: String = "NORMAL"): String = runBlocking<Unit> {
+    private fun submit(url: String, fileName: String, priority: String = "NORMAL"): String = runBlocking {
         val q = queue!!
         val entity = makeEntity(url, fileName).copy(priority = priority)
         assertTrue(q.submit(entity))
         entity.id
     }
 
-    private fun stateOf(id: String): String? = runBlocking<Unit> { repo.get(id)?.state }
+    private fun stateOf(id: String): String? = runBlocking { repo.get(id)?.state }
 
-    private fun entityOf(id: String): DownloadTaskEntity? = runBlocking<Unit> { repo.get(id) }
+    private fun entityOf(id: String): DownloadTaskEntity? = runBlocking { repo.get(id) }
 
     @Test
     fun dispatchesHighestPriorityFirst() = runBlocking<Unit> {
