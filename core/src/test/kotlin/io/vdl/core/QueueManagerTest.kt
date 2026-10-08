@@ -31,46 +31,46 @@ import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 
-class InMemoryTaskRepository : TaskRepository {
+internal class InMemoryTaskRepository : TaskRepository {
 
     private val flow = MutableStateFlow<List<DownloadTaskEntity>>(emptyList())
     private val current: List<DownloadTaskEntity> get() = flow.value
 
-    override suspend fun add(task: DownloadTaskEntity): Boolean {
+    internal override suspend fun add(task: DownloadTaskEntity): Boolean {
         if (current.any { it.url == task.url && it.fileName == task.fileName }) return false
         flow.value = current + task
         return true
     }
 
-    override suspend fun update(task: DownloadTaskEntity) {
+    internal override suspend fun update(task: DownloadTaskEntity) {
         flow.value = current.map { if (it.id == task.id) task else it }
     }
 
-    override suspend fun get(id: String): DownloadTaskEntity? = current.firstOrNull { it.id == id }
+    internal override suspend fun get(id: String): DownloadTaskEntity? = current.firstOrNull { it.id == id }
 
-    override suspend fun delete(id: String) {
+    internal override suspend fun delete(id: String) {
         flow.value = current.filterNot { it.id == id }
     }
 
-    override suspend fun clearCompleted(): Int {
+    internal override suspend fun clearCompleted(): Int {
         val done = current.filter { it.state == TaskState.COMPLETED.name }
         flow.value = current - done.toSet()
         return done.size
     }
 
-    override fun observe(id: String): Flow<DownloadTaskEntity?> =
+    internal override fun observe(id: String): Flow<DownloadTaskEntity?> =
         flow.map { list -> list.firstOrNull { it.id == id } }.distinctUntilChanged()
 
-    override fun observeAll(): Flow<List<DownloadTaskEntity>> = flow.asStateFlow()
+    internal override fun observeAll(): Flow<List<DownloadTaskEntity>> = flow.asStateFlow()
 
-    override suspend fun pendingOrdered(): List<DownloadTaskEntity> =
+    internal override suspend fun pendingOrdered(): List<DownloadTaskEntity> =
         current.filter { it.state == TaskState.PENDING.name }
             .sortedWith(compareBy({ priorityRank(it.priority) }, { it.createdAt }))
 
-    override suspend fun runningOrphans(): List<DownloadTaskEntity> =
+    internal override suspend fun runningOrphans(): List<DownloadTaskEntity> =
         current.filter { it.state == TaskState.RUNNING.name }
 
-    override suspend fun activeTasks(): List<DownloadTaskEntity> =
+    internal override suspend fun activeTasks(): List<DownloadTaskEntity> =
         current.filter { it.state != TaskState.COMPLETED.name && it.state != TaskState.CANCELLED.name }
 
     private fun priorityRank(raw: String): Int = when (raw) {
@@ -81,13 +81,13 @@ class InMemoryTaskRepository : TaskRepository {
 }
 
 /** Scripted engine: hangs on a gate when asked, sets chunk state, returns a fixed outcome. */
-class FakeEngine : DownloadEngine {
-    val started = mutableListOf<String>()
-    var result: EngineOutcome = EngineOutcome.Success(1_000L)
-    var hang = false
-    val gate = CompletableDeferred<Unit>()
+internal class FakeEngine : DownloadEngine {
+    internal val started = mutableListOf<String>()
+    internal var result: EngineOutcome = EngineOutcome.Success(1_000L)
+    internal var hang = false
+    internal val gate = CompletableDeferred<Unit>()
 
-    override suspend fun execute(
+    internal override suspend fun execute(
         task: DownloadTaskEntity,
         partFile: File,
         state: EngineState,
@@ -109,17 +109,17 @@ class FakeEngine : DownloadEngine {
     }
 }
 
-class FakeFactory(private val dir: File) : PartFileFactory {
-    val created = mutableSetOf<String>()
+internal class FakeFactory(private val dir: File) : PartFileFactory {
+    internal val created = mutableSetOf<String>()
 
-    override fun partFor(id: String, fileName: String): File {
+    internal override fun partFor(id: String, fileName: String): File {
         created += id
         val f = File(dir, "$id.part")
         if (!f.exists()) f.createNewFile()
         return f
     }
 
-    override fun cleanup(id: String) {
+    internal override fun cleanup(id: String) {
         File(dir, "$id.part").delete()
     }
 }

@@ -21,18 +21,18 @@ class PrintSink : Logger {
     }
 }
 
-fun testLog(sink: PrintSink = PrintSink()): VdlLog = VdlLog(sink, debug = true)
+internal fun testLog(sink: PrintSink = PrintSink()): VdlLog = VdlLog(sink, debug = true)
 
-suspend fun awaitTrue(timeoutMs: Long = 10_000, cond: () -> Boolean) {
+internal suspend fun awaitTrue(timeoutMs: Long = 10_000, cond: () -> Boolean) {
     withTimeout(timeoutMs) {
         while (!cond()) delay(10)
     }
 }
 
-fun randomBytes(size: Int, seed: Int = 42): ByteArray =
+internal fun randomBytes(size: Int, seed: Int = 42): ByteArray =
     Random(seed).nextBytes(size)
 
-fun makeEntity(
+internal fun makeEntity(
     url: String,
     fileName: String = "file.bin",
     threads: Int = 4,
@@ -153,6 +153,8 @@ class RangeDispatcher(
 
     private fun parseRange(value: String): Pair<Long, Long>? {
         val m = Regex("^bytes=(\\d+)-(\\d+)$").find(value.trim()) ?: return null
-        return m.groupValues[1].toLongOrNull() to m.groupValues[2].toLongOrNull()
+        val start = m.groupValues[1].toLongOrNull() ?: return null
+        val end = m.groupValues[2].toLongOrNull() ?: return null
+        return start to end
     }
 }
