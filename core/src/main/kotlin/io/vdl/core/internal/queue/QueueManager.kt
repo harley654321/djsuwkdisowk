@@ -321,8 +321,10 @@ internal class QueueManager internal constructor(
             }
             val avail = spaceChecker.availableBytes()
             if (c.bytesTotal > 0 && avail in 0 until c.bytesTotal) {
+                // Log BEFORE the observable mutation: an observer awaiting the
+                // FAILED state must find the evidence line already emitted.
+                log.e(TAG) { "dispatch task=${c.id} reason=insufficientSpace need=${c.bytesTotal} avail=$avail old=${c.state} new=FAILED decision=fail-fast" }
                 repository.update(c.withState(TaskState.FAILED, clockMs(), ErrorCodec.encode(DownloadError.InsufficientSpace)))
-                log.e(TAG) { "dispatch task=${c.id} reason=insufficientSpace need=${c.bytesTotal} avail=$avail" }
                 continue
             }
             startEngine(c)
