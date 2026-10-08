@@ -4,6 +4,8 @@ import io.vdl.core.internal.hls.Aes128
 import io.vdl.core.internal.hls.HlsDownloader
 import io.vdl.core.internal.hls.HlsOutcome
 import io.vdl.core.internal.hls.HlsPlan
+import io.vdl.core.internal.mp4.Fmp4Muxer
+import io.vdl.core.internal.mp4.Mp4
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -559,4 +561,141 @@ class HlsAudioTrackIntegrationTest {
         assertEquals(404, (result as HlsOutcome.Fatal).httpCode)
         assertTrue(sink.lines.any { it.contains("fetch fatal") && it.contains("audio-media") })
     }
+}
+
+// ------------------------------------------------ HLS download -> MP4 mux
+
+class HlsToMuxPipelineIntegrationTest {
+
+    private lateinit var server: MockWebServer
+    private val client = OkHttpClient()
+    private lateinit var tmp: File
+    private val sink = PrintSink()
+
+    @Before
+    fun setUp() {
+        server = MockWebServer()
+        server.start()
+        tmp = Files.createTempDirectory("vdl-pipe").toFile()
+    }
+
+    @After
+    fun tearDown() {
+        server.close()
+        tmp.deleteRecursively()
+    }
+
+    /**
+     * Full pipeline evidence: an HLS origin serves fMP4 init + segments
+     * for video and audio; the downloader fetches and concatenates both
+     * tracks; the muxer merges them into ONE fragmented MP4.
+     */
+    @Test
+    fun hlsDownloadThenMuxProducesSingleFileWithBothTracks() {
+        // video: track 1, fragments at decode time 0 / 1000
+        val vPayloads = listOf(randomBytes(1000, seed = 91), randomBytes(1100, seed = 92))
+        val aPayloads = listOf(randomBytes(500, seed = 93), randomBytes(550, seed = 94))
+        val videoInit = TestFmp4Fixtures.initStream(1, 1000, "vide", audio = false)
+        val audioInit = TestFmp4Fixtures.initStream(1, 44_100, "soun", audio = true)
+        val vSegs = listOf(
+            TestFmp4Fixtures.segment(1, 0, 0L, vPayloads[0]),
+            TestFmp4Fixtures.segment(1, 1, 1000L, vPayloads[1])
+        )
+        val aSegs = listOf(
+            TestFmp4Fixtures.segment(1, 0, 0L, aPayloads[0]),
+            TestFmp4Fixtures.segment(1, 1, 960L, aPayloads[1])
+        )
+
+        val master = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",DEFAULT=YES,URI="audio.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720,AUDIO="aud"
+            video.m3u8
+        """.trimIndent()
+        val videoPl = """
+            #EXTM3U
+            #EXT-X-TARGETDURATION:4
+            #EXT-X-MAP:URI="vinit.mp4"
+            #EXTINF:4.0,
+            v0.m4s
+            #EXTINF:4.0,
+            v1.m4s
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        val audioPl = """
+            #EXTM3U
+            #EXT-X-TARGETDURATION:4
+            #EXT-X-MAP:URI="ainit.mp4"
+            #EXTINF:4.0,
+            a0.m4s
+            #EXTINF:4.0,
+            a1.m4s
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                return when (request.url.encodedPath) {
+                    "/master.m3u8" -> MockResponse.Builder().code(200).body(Buffer().writeUtf8(master)).build()
+                    "/video.m3u8" -> MockResponse.Builder().code(200).body(Buffer().writeUtf8(videoPl)).build()
+                    "/audio.m3u8" -> MockResponse.Builder().code(200).body(Buffer().writeUtf8(audioPl)).build()
+                    "/vinit.mp4" -> MockResponse.Builder().code(200).body(Buffer().write(videoInit)).build()
+                    "/ainit.mp4" -> MockResponse.Builder().code(200).body(Buffer().write(audioInit)).build()
+                    "/v0.m4s" -> MockResponse.Builder().code(200).body(Buffer().write(vSegs[0])).build()
+                    "/v1.m4s" -> MockResponse.Builder().code(200).body(Buffer().write(vSegs[1])).build()
+                    "/a0.m4s" -> MockResponse.Builder().code(200).body(Buffer().write(aSegs[0])).build()
+                    "/a1.m4s" -> MockResponse.Builder().code(200).body(Buffer().write(aSegs[1])).build()
+                    else -> MockResponse.Builder().code(404).build()
+                }
+            }
+        }
+
+        // 1. HLS download: both tracks concatenated (styp dropped later by mux)
+        val video = File(tmp, "video.mp4")
+        val audio = File(tmp, "audio.mp4")
+        val dl = kotlinx.coroutines.runBlocking {
+            HlsDownloader(client, testLog(sink), sleeper = { _ -> }).download(
+                url("/master.m3u8"), video, policy = RetryPolicy.Exponential(baseDelayMs = 5L, maxAttempts = 4), audioOut = audio
+            ) { }
+        }
+        assertTrue("hls download failed: $dl", dl is HlsOutcome.Success)
+        assertEquals(3, (dl as HlsOutcome.Success).units)
+        assertEquals(3, dl.audioUnits)
+
+        // 2. mux both concatenated streams into one fragmented MP4
+        val muxLog = testLog(PrintSink())
+        val single = File(tmp, "final.mp4")
+        val muxResult = Fmp4Muxer.muxFiles(video, audio, single, muxLog)
+        assertEquals(4, muxResult.videoFragments + muxResult.audioFragments)
+        assertEquals(1L, muxResult.videoTrackId)
+        assertEquals(2L, muxResult.audioTrackId)
+
+        // 3. verify the single file: structure + interleaving + payloads
+        val out = single.readBytes()
+        val boxes = Mp4.readBoxes(out)
+        assertEquals(listOf("ftyp", "moov", "moof", "mdat", "moof", "mdat", "moof", "mdat", "moof", "mdat"),
+            boxes.map { it.type })
+        val moovChildren = Mp4.readBoxes(boxes[1].body).map { it.type }
+        assertEquals(listOf("mvhd", "trak", "trak", "mvex"), moovChildren)
+        // fragment order by tfdt: v(0), a(0), a(960), v(1000)
+        var moofIdx = 2
+        val expect = listOf(
+            Triple(1L, 0L, vPayloads[0]), Triple(2L, 0L, aPayloads[0]),
+            Triple(2L, 960L, aPayloads[1]), Triple(1L, 1000L, vPayloads[1])
+        )
+        for (e in expect) {
+            val moof = boxes[moofIdx]
+            val children = Mp4.readBoxes(moof.body)
+            val traf = Mp4.readBoxes(children.first { it.type == "traf" }.body)
+            val tfhd = traf.first { it.type == "tfhd" }
+            val tfdt = traf.first { it.type == "tfdt" }
+            assertEquals(e.first, Mp4.readU32(tfhd.body, 4))
+            assertEquals(e.second, Mp4.readU32(tfdt.body, 4))
+            assertArrayEquals(e.third, boxes[moofIdx + 1].body)
+            moofIdx += 2
+        }
+        // every styp from the HLS segments was dropped in the final file
+        assertTrue(Mp4.readBoxes(out).none { it.type == "styp" })
+    }
+
+    private fun url(path: String): String = server.url(path).toString()
 }
