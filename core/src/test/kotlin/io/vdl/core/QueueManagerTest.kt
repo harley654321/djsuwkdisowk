@@ -182,19 +182,19 @@ class QueueManagerTest {
 
     @Test
     fun dispatchesHighestPriorityFirst() = runBlocking<Unit> {
-        engine.hang = true
+        // No preemption exists by design: dispatch ORDER is priority-based,
+        // so gate all three behind systemPause, then release and observe
+        // that the pump hands the single slot to HIGH first, then NORMAL, then LOW.
         newQueue(maxParallel = 1)
+        queue!!.setSystemPaused(true)
         val low = submit("https://a/low", "low.bin", priority = "LOW")
         val normal = submit("https://a/normal", "normal.bin", priority = "NORMAL")
         val high = submit("https://a/high", "high.bin", priority = "HIGH")
-        awaitTrue { stateOf(high) == TaskState.RUNNING.name }
-        assertEquals(listOf(high), engine.started)
-        engine.release()
-        awaitTrue { stateOf(normal) == TaskState.RUNNING.name }
-        awaitTrue { stateOf(low) == TaskState.RUNNING.name }
+        awaitTrue { listOf(low, normal, high).all { stateOf(it) == TaskState.PENDING.name } }
+        queue!!.setSystemPaused(false)
+        queue!!.networkChanged()
+        awaitTrue { stateOf(low) == TaskState.COMPLETED.name }
         assertEquals(listOf(high, normal, low), engine.started)
-        engine.hang = false
-        engine.gate.complete(Unit)
     }
 
     @Test

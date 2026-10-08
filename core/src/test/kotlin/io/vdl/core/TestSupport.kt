@@ -6,9 +6,10 @@ import io.vdl.core.internal.db.TaskState
 import io.vdl.core.Logger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
-import okhttp3.mockwebserver.Dispatcher
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.RecordedRequest
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.RecordedRequest
+import mockwebserver3.SocketEffect
 import okio.Buffer
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
@@ -46,7 +47,7 @@ internal fun makeEntity(
     retryMaxAttempts: Int = 5,
     state: TaskState = TaskState.PENDING
 ): DownloadTaskEntity = DownloadTaskEntity(
-    id = "$fileName-$url",
+    id = "task-" + kotlin.math.abs((fileName + url).hashCode()),
     url = url,
     fileName = fileName,
     destinationType = "APP_PRIVATE",
@@ -88,67 +89,71 @@ class RangeDispatcher(
     var throttles: Int = 0,
     /** Disconnect this many range requests at socket level. */
     var disconnects: Int = 0
-) : Dispatcher() {
+) : mockwebserver3.Dispatcher() {
 
     val httpCalls = AtomicInteger(0)
     val rangeRequests = AtomicInteger(0)
 
     override fun dispatch(request: RecordedRequest): MockResponse {
         httpCalls.incrementAndGet()
-        val range = request.getHeader("Range")
-        val ifRange = request.getHeader("If-Range")
+        val range = request.headers["Range"]
+        val ifRange = request.headers["If-Range"]
 
         if (request.method == "HEAD") {
-            return MockResponse()
-                .setResponseCode(200)
-                .setHeader("Accept-Ranges", if (supportRanges) "bytes" else "none")
-                .setHeader("ETag", etag)
-                .setHeader("Content-Length", data.size.toString())
+            return MockResponse.Builder()
+                .code(200)
+                .addHeader("Accept-Ranges", if (supportRanges) "bytes" else "none")
+                .addHeader("ETag", etag)
+                .addHeader("Content-Length", data.size.toString())
+                .build()
         }
 
         if (throttles > 0) {
             throttles--
-            return MockResponse().setResponseCode(429).setHeader("Retry-After", "0")
+            return MockResponse.Builder().code(429).addHeader("Retry-After", "0").build()
         }
 
         if (range == null || !supportRanges) {
-            return MockResponse()
-                .setResponseCode(200)
-                .setHeader("Accept-Ranges", if (supportRanges) "bytes" else "none")
-                .setHeader("ETag", etag)
-                .setBody(Buffer().write(data))
+            return MockResponse.Builder()
+                .code(200)
+                .addHeader("Accept-Ranges", if (supportRanges) "bytes" else "none")
+                .addHeader("ETag", etag)
+                .body(Buffer().write(data))
+                .build()
         }
 
         // If-Range mismatch -> 200 with the full new body (RFC 7233)
         if (ifRange != null && ifRange != etag) {
-            return MockResponse()
-                .setResponseCode(200)
-                .setHeader("ETag", etag)
-                .setBody(Buffer().write(data))
+            return MockResponse.Builder()
+                .code(200)
+                .addHeader("ETag", etag)
+                .body(Buffer().write(data))
+                .build()
         }
 
         rangeRequests.incrementAndGet()
         if (failFirstRange > 0) {
             failFirstRange--
-            return MockResponse().setResponseCode(200).setHeader("ETag", etag)
-                .setBody(Buffer().write(data))
+            return MockResponse.Builder().code(200).addHeader("ETag", etag)
+                .body(Buffer().write(data)).build()
         }
         if (disconnects > 0) {
             disconnects--
-            return MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_START)
+            return MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build()
         }
 
-        val parsed = parseRange(range) ?: return MockResponse().setResponseCode(416)
+        val parsed = parseRange(range) ?: return MockResponse.Builder().code(416).build()
         val (start, end) = parsed
         if (start >= data.size || end >= data.size) {
-            return MockResponse().setResponseCode(416)
+            return MockResponse.Builder().code(416).build()
         }
         val slice = data.copyOfRange(start.toInt(), end.toInt() + 1)
-        return MockResponse()
-            .setResponseCode(206)
-            .setHeader("Content-Range", "bytes $start-$end/${data.size}")
-            .setHeader("ETag", etag)
-            .setBody(Buffer().write(slice))
+        return MockResponse.Builder()
+            .code(206)
+            .addHeader("Content-Range", "bytes $start-$end/${data.size}")
+            .addHeader("ETag", etag)
+            .body(Buffer().write(slice))
+            .build()
     }
 
     private fun parseRange(value: String): Pair<Long, Long>? {
@@ -157,4 +162,22 @@ class RangeDispatcher(
         val end = m.groupValues[2].toLongOrNull() ?: return null
         return start to end
     }
+}
+
+
+/**
+ * Body of unknown length: MockWebServer streams it with Transfer-Encoding: chunked,
+ * forcing the engine to read to EOF (unknown total length scenario).
+ */
+internal class EofBody internal constructor(
+    private val data: ByteArray
+) : mockwebserver3.MockResponseBody {
+    override fun writeTo(sink: okio.BufferedSink) {
+        // Closing the sink emits the terminal chunk (chunked framing) /
+        // half-closes the stream so the client can see EOF.
+        sink.write(okio.Buffer().write(data), data.size.toLong())
+        sink.close()
+    }
+
+    override val contentLength: Long get() = -1L
 }

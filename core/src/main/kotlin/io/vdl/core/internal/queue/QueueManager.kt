@@ -147,7 +147,16 @@ internal class QueueManager internal constructor(
             } catch (t: Throwable) {
                 log.e(TAG, t) { "event=${e::class.simpleName} handler crash decision=continue" }
             }
-            pump()
+            // pump() runs OUTSIDE handle's try on purpose: a dispatch failure
+            // (storage error, hostile filename) must degrade that one dispatch,
+            // never kill the loop and brick the whole queue.
+            try {
+                pump()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                log.e(TAG, t) { "pump crash decision=continue" }
+            }
         }
     }
 

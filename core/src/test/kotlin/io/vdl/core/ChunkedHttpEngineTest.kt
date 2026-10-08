@@ -6,7 +6,7 @@ import io.vdl.core.internal.engine.EngineOutcome
 import io.vdl.core.internal.engine.EngineState
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
-import okhttp3.mockwebserver.MockWebServer
+import mockwebserver3.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -34,7 +34,7 @@ class ChunkedHttpEngineTest {
 
     @After
     fun tearDown() {
-        server.shutdown()
+        server.close()
         tmp.deleteRecursively()
     }
 
@@ -58,7 +58,7 @@ class ChunkedHttpEngineTest {
         val dispatcher = RangeDispatcher(data)
         server.dispatcher = dispatcher
         val part = partFile()
-        val outcome = runBlocking<Unit> {
+        val outcome = runBlocking {
             engine().execute(
                 makeEntity(url(), threads = 4, chunkSizeBytes = 256L * 1024),
                 part,
@@ -80,7 +80,7 @@ class ChunkedHttpEngineTest {
         val dispatcher = RangeDispatcher(data, supportRanges = false)
         server.dispatcher = dispatcher
         val part = partFile()
-        val outcome = runBlocking<Unit> {
+        val outcome = runBlocking {
             engine().execute(
                 makeEntity(url(), threads = 4, chunkSizeBytes = 256L * 1024),
                 part,
@@ -115,7 +115,7 @@ class ChunkedHttpEngineTest {
             chunksEnc = "0-${256 * 1024 - 1}-${256 * 1024}",
             bytesDownloaded = 256L * 1024
         )
-        val outcome = runBlocking<Unit> { engine().execute(entity, part, state, onProgress()) }
+        val outcome = runBlocking { engine().execute(entity, part, state, onProgress()) }
         assertTrue(outcome is EngineOutcome.Success)
         assertArrayEquals(data, part.readBytes())
         // 3 remaining chunks of 256KB + probe skipped (chunks present)
@@ -135,7 +135,7 @@ class ChunkedHttpEngineTest {
             etag = "\"v1\""
             chunks = ChunkPlanForTest(data.size.toLong())
         }
-        val outcome = runBlocking<Unit> {
+        val outcome = runBlocking {
             engine().execute(
                 makeEntity(url(), bytesTotal = data.size.toLong(), acceptRanges = true, etag = "\"v1\""),
                 part,
@@ -154,7 +154,7 @@ class ChunkedHttpEngineTest {
         dispatcher.throttles = 2
         server.dispatcher = dispatcher
         val part = partFile()
-        val outcome = runBlocking<Unit> {
+        val outcome = runBlocking {
             engine().execute(
                 makeEntity(url(), threads = 4, chunkSizeBytes = 256L * 1024),
                 part,
@@ -174,7 +174,7 @@ class ChunkedHttpEngineTest {
         dispatcher.disconnects = 1
         server.dispatcher = dispatcher
         val part = partFile()
-        val outcome = runBlocking<Unit> {
+        val outcome = runBlocking {
             engine().execute(
                 makeEntity(url(), threads = 4, chunkSizeBytes = 256L * 1024),
                 part,
@@ -189,12 +189,12 @@ class ChunkedHttpEngineTest {
     @Test
     fun missingResourceIsFatal() {
         server.enqueue(
-            okhttp3.mockwebserver.MockResponse().setResponseCode(404)
+            mockwebserver3.MockResponse.Builder().code(404).build()
         )
         server.enqueue(
-            okhttp3.mockwebserver.MockResponse().setResponseCode(404)
+            mockwebserver3.MockResponse.Builder().code(404).build()
         )
-        val outcome = runBlocking<Unit> {
+        val outcome = runBlocking {
             engine().execute(makeEntity(url()), partFile(), EngineState(), onProgress())
         }
         assertTrue(outcome is EngineOutcome.Fatal)
@@ -204,20 +204,22 @@ class ChunkedHttpEngineTest {
     @Test
     fun unknownTotalLengthStreamsToEof() {
         val data = randomBytes(400 * 1024, seed = 19)
-        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
-            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): okhttp3.mockwebserver.MockResponse {
+        server.dispatcher = object : mockwebserver3.Dispatcher() {
+            override fun dispatch(request: mockwebserver3.RecordedRequest): mockwebserver3.MockResponse {
                 return if (request.method == "HEAD") {
-                    okhttp3.mockwebserver.MockResponse().setResponseCode(200)
-                        .setHeader("Accept-Ranges", "none")
+                    mockwebserver3.MockResponse.Builder().code(200)
+                        .addHeader("Accept-Ranges", "none")
+                        .build()
                 } else {
-                    okhttp3.mockwebserver.MockResponse().setResponseCode(200)
-                        .setHeader("Accept-Ranges", "none")
-                        .setChunkedBody(okio.Buffer().write(data), 16 * 1024)
+                    mockwebserver3.MockResponse.Builder().code(200)
+                        .addHeader("Accept-Ranges", "none")
+                        .body(EofBody(data))
+                        .build()
                 }
             }
         }
         val part = partFile()
-        val outcome = runBlocking<Unit> {
+        val outcome = runBlocking {
             engine().execute(
                 makeEntity(url(), threads = 4, chunkSizeBytes = 256L * 1024),
                 part,
@@ -235,7 +237,7 @@ class ChunkedHttpEngineTest {
         val dispatcher = RangeDispatcher(randomBytes(300 * 1024, seed = 21))
         dispatcher.disconnects = Int.MAX_VALUE
         server.dispatcher = dispatcher
-        val outcome = runBlocking<Unit> {
+        val outcome = runBlocking {
             engine().execute(
                 makeEntity(url(), retryBaseDelayMs = 1, retryMaxAttempts = 2),
                 partFile(), EngineState(), onProgress()

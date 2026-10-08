@@ -100,7 +100,13 @@ internal class ChunkedHttpEngine internal constructor(
                 state.chunks = state.chunks.map { it.copy(downloaded = 0L) }
                 continue
             }
-            return@withContext outcome as EngineOutcome
+            // streamOnce returns Either<EngineOutcome, TransferResult.Fail>;
+            // unwrap the Fail envelope so a single-stream failure surfaces its
+            // typed EngineOutcome instead of blowing up with a ClassCastException.
+            return@withContext when (outcome) {
+                is TransferResult.Fail -> outcome.outcome
+                else -> outcome as EngineOutcome
+            }
         }
         @Suppress("UNREACHABLE_CODE")
         EngineOutcome.Fatal("unreachable")
