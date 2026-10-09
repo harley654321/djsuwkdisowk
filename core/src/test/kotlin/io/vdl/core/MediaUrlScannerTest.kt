@@ -84,7 +84,7 @@ class MediaUrlScannerTest {
         val page = """<a href="https://www.mp4upload.com/embed-v1mvrhx69yp7.html">mp4</a>""" +
             """ watch at https://www.mp4upload.com/embed-v1mvrhx69yp7.html now"""
         assertTrue(hits(page).none { it.url == "https://www.mp4" })
-        assertTrue(hits(page).none { it.kind == io.vdl.core.internal.extract.SourceKind.DIRECT })
+        assertTrue(hits(page).none { it.kind == SourceKind.DIRECT })
     }
 
     @Test
