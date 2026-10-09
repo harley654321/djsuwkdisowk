@@ -2,7 +2,9 @@ package io.vdl.core.internal.engine
 
 import io.vdl.core.RetryPolicy
 import io.vdl.core.internal.logging.VdlLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import java.io.IOException
 
 /**
  * Typed outcome of one HTTP fetch with retry policy applied.
@@ -57,21 +59,34 @@ internal class RetryFetch internal constructor(
                     header("Range", "bytes=${offset ?: 0L}-${to ?: ""}")
                 }
             }.build()
-            client.newCall(req).execute().use { resp ->
-                when {
-                    resp.code == 200 || (resp.code == 206 && offset != null) -> {
-                        val v = extract(resp)
-                        return if (v is String) FetchResult.Text(v) else FetchResult.Bytes(v as ByteArray)
+            try {
+                client.newCall(req).execute().use { resp ->
+                    when {
+                        resp.code == 200 || (resp.code == 206 && offset != null) -> {
+                            val v = extract(resp)
+                            return if (v is String) FetchResult.Text(v) else FetchResult.Bytes(v as ByteArray)
+                        }
+                        resp.code == 429 || resp.code in 500..599 -> {
+                            retryAfterMs = Backoff.retryAfterMs(resp.header("Retry-After"))
+                            lastReason = "http ${resp.code}"
+                            log.w(tag) { "fetch throttle what=$what attempt=$attempt code=${resp.code} url=$url retryAfter=${retryAfterMs ?: "-"}" }
+                        }
+                        else -> {
+                            log.e(tag) { "fetch fatal what=$what code=${resp.code} url=$url decision=fatal" }
+                            return FetchResult.Fatal("http ${resp.code} fetching $what", resp.code)
+                        }
                     }
-                    resp.code == 429 || resp.code in 500..599 -> {
-                        retryAfterMs = Backoff.retryAfterMs(resp.header("Retry-After"))
-                        lastReason = "http ${resp.code}"
-                        log.w(tag) { "fetch throttle what=$what attempt=$attempt code=${resp.code} url=$url retryAfter=${retryAfterMs ?: "-"}" }
-                    }
-                    else -> {
-                        log.e(tag) { "fetch fatal what=$what code=${resp.code} url=$url decision=fatal" }
-                        return FetchResult.Fatal("http ${resp.code} fetching $what", resp.code)
-                    }
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (io: IOException) {
+                // Transport failure (reset/EOF/timeout mid-body): retryable within
+                // the same budget as 429/5xx. Never let it crash the whole engine -
+                // that bypasses RetryPolicy and kills the task at queue level.
+                retryAfterMs = null
+                lastReason = "io ${io.javaClass.simpleName}"
+                log.w(tag) {
+                    "fetch io what=$what attempt=$attempt err=${io.javaClass.simpleName}: ${io.message ?: "-"} url=$url decision=retry"
                 }
             }
             attempt++
