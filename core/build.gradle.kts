@@ -92,9 +92,8 @@ publishing {
 // (extracts jni/<os>_<arch>/libquickjs.so from the classpath). Only the
 // jvm actual can load in a unit-test JVM, so its jar is placed FIRST on
 // the test classpath — its classes deterministically shadow the AAR's.
-val quickjsJvmJar = configurations.testRuntimeClasspath.map { cp ->
-    cp.filter { it.name.startsWith("quickjs-kt-jvm") }
-}
 tasks.withType<Test>().configureEach {
-    classpath = files(quickjsJvmJar) + classpath
+    // self-referential filter: no configuration lookup, stays lazy
+    val original = classpath
+    classpath = original.filter { it.name.startsWith("quickjs-kt-jvm") } + original
 }
