@@ -53,13 +53,30 @@ internal class NotificationHelper internal constructor(
         notify(ID_PROGRESS, builder.build())
     }
 
-    internal fun complete(fileName: String, filePath: String?) {
+    internal fun complete(fileName: String, filePath: String?, taskId: String? = null) {
         val builder = baseBuilder()
             .setContentTitle(fileName)
             .setContentText(if (filePath != null) "Saved: $filePath" else "Download complete")
             .setOngoing(false)
             .setAutoCancel(true)
-        notify(ID_COMPLETE, builder.build())
+        // per-task id when known: several completions coexist in the tray
+        notify(taskId?.let { stableId(ID_COMPLETE_BASE, it) } ?: ID_COMPLETE, builder.build())
+    }
+
+    /**
+     * Terminal failure notification with a Retry action. The Retry
+     * PendingIntent targets the service (which may be STOPPED at this
+     * point: the queue is idle after the failure) so it uses
+     * getForegroundService and the RETRY branch calls startForeground.
+     */
+    internal fun failed(fileName: String, reason: String, taskId: String) {
+        val builder = baseBuilder()
+            .setContentTitle(fileName)
+            .setContentText("Failed: $reason")
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .addAction(0, "Retry", serviceIntent(DownloadService.ACTION_RETRY, taskId))
+        notify(stableId(ID_FAILED_BASE, taskId), builder.build())
     }
 
     /** Immediate notification for startForeground(); never throttled. */
@@ -90,15 +107,23 @@ internal class NotificationHelper internal constructor(
             .setOnlyAlertOnce(true)
     }
 
-    private fun serviceIntent(action: String): PendingIntent {
+    private fun serviceIntent(action: String, taskId: String? = null): PendingIntent {
         val intent = Intent(context.applicationContext, DownloadService::class.java).setAction(action)
+        if (taskId != null) intent.putExtra(DownloadService.EXTRA_TASK_ID, taskId)
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val requestCode = (action + (taskId ?: "")).hashCode()
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            PendingIntent.getForegroundService(context.applicationContext, action.hashCode(), intent, flags)
+            PendingIntent.getForegroundService(context.applicationContext, requestCode, intent, flags)
         } else {
-            PendingIntent.getService(context.applicationContext, action.hashCode(), intent, flags)
+            PendingIntent.getService(context.applicationContext, requestCode, intent, flags)
         }
     }
+
+    /** Stable per-task notification id in [base, base+RANGE). */
+    private fun stableId(base: Int, taskId: String): Int =
+        (base + kotlin.math.abs(taskId.hashCode()) % ID_RANGE).also {
+            log.d(TAG) { "notif id=$it task=$taskId base=$base" }
+        }
 
     private fun notify(id: Int, notification: Notification) {
         if (!canNotify()) {
@@ -123,6 +148,9 @@ internal class NotificationHelper internal constructor(
         internal const val CHANNEL_ID = "vdl_downloads"
         internal const val ID_PROGRESS = 4711
         internal const val ID_COMPLETE = 4712
+        internal const val ID_COMPLETE_BASE = 5000
+        internal const val ID_FAILED_BASE = 14000
+        private const val ID_RANGE = 8000
         private const val UPDATE_INTERVAL_MS = 500L
     }
 }

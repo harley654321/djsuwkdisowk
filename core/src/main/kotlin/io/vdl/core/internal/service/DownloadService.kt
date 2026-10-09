@@ -42,6 +42,17 @@ internal class DownloadService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
+            ACTION_RETRY -> {
+                val id = intent.getStringExtra(EXTRA_TASK_ID)
+                log("action RETRY id=$id")
+                // The service may be STOPPED when the user taps Retry
+                // (the queue went idle after the failure): the PendingIntent
+                // uses getForegroundService, so startForeground is REQUIRED
+                // here before returning.
+                startForegroundCompat()
+                if (id != null) VdlDownloader.bridge.retry(id)
+                return START_STICKY
+            }
         }
         startForegroundCompat()
         return START_STICKY
@@ -93,6 +104,8 @@ internal class DownloadService : Service() {
         internal const val ACTION_PAUSE_ALL = "io.vdl.core.action.PAUSE_ALL"
         internal const val ACTION_CANCEL_ALL = "io.vdl.core.action.CANCEL_ALL"
         internal const val ACTION_STOP = "io.vdl.core.action.STOP"
+        internal const val ACTION_RETRY = "io.vdl.core.action.RETRY"
+        internal const val EXTRA_TASK_ID = "io.vdl.core.extra.TASK_ID"
 
         internal fun start(context: Context) {
             val intent = Intent(context, DownloadService::class.java)

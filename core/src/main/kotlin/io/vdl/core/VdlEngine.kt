@@ -19,6 +19,7 @@ import io.vdl.core.internal.net.NetworkMonitor
 import io.vdl.core.internal.queue.QueueManager
 import io.vdl.core.internal.service.DownloadService
 import io.vdl.core.internal.extract.QuickJsEngine
+import io.vdl.core.internal.notify.NotificationPolicy
 import io.vdl.core.internal.extract.SourceResolver
 import io.vdl.core.internal.service.NotificationHelper
 import io.vdl.core.internal.storage.AndroidPartFileFactory
@@ -35,7 +36,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
-import java.util.Collections
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -71,8 +71,8 @@ internal class VdlEngine internal constructor(
         maxParallel = config.maxParallelDownloads
     )
     private val helper = NotificationHelper(appContext, log)
+    private val notificationPolicy = NotificationPolicy()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val notifiedCompleted = Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
     private val serviceStarted = AtomicBoolean(false)
 
     init {
@@ -153,31 +153,33 @@ internal class VdlEngine internal constructor(
     private suspend fun notificationLoop() {
         combine(queue.observeAllTasks(), queue.progressFlow()) { t, p -> t to p }
             .collect { (tasks, progress) ->
+                // pure policy decides WHAT to show; this loop only executes
+                for (d in notificationPolicy.reduce(tasks, progress)) {
+                    when (d) {
+                        is NotificationPolicy.Decision.Progress ->
+                            helper.progress(d.fileName, d.done, d.total, actions = true)
+                        is NotificationPolicy.Decision.Completed -> {
+                            log.i(TAG) { "notify complete task=${d.id} file=${d.fileName}" }
+                            helper.complete(d.fileName, d.filePath, d.id)
+                        }
+                        is NotificationPolicy.Decision.Failed -> {
+                            log.w(TAG) { "notify failed task=${d.id} file=${d.fileName} reason=${d.reason}" }
+                            helper.failed(d.fileName, d.reason, d.id)
+                        }
+                        NotificationPolicy.Decision.CancelProgress -> helper.cancel()
+                    }
+                }
+
+                // service lifecycle follows queue activity, not notifications
                 val active = tasks.filter { it.state == TaskState.RUNNING.name }
                 if (active.isEmpty()) {
                     if (serviceStarted.compareAndSet(true, false)) {
                         log.i(TAG) { "queue idle decision=stopService" }
                         DownloadService.stop(appContext)
                     }
-                } else {
-                    val shown = active.firstOrNull { it.showNotification } ?: active.first()
-                    if (shown.showNotification) {
-                        helper.progress(
-                            shown.fileName,
-                            progress[shown.id]?.bytesDownloaded ?: shown.bytesDownloaded,
-                            progress[shown.id]?.bytesTotal ?: shown.bytesTotal,
-                            actions = true
-                        )
-                    }
-                    if (serviceStarted.compareAndSet(false, true)) {
-                        log.i(TAG) { "active=${active.size} decision=startService" }
-                        DownloadService.start(appContext)
-                    }
-                }
-                for (t in tasks) {
-                    if (t.state == TaskState.COMPLETED.name && t.showNotification && notifiedCompleted.add(t.id)) {
-                        helper.complete(t.fileName, t.resultPath)
-                    }
+                } else if (serviceStarted.compareAndSet(false, true)) {
+                    log.i(TAG) { "active=${active.size} decision=startService" }
+                    DownloadService.start(appContext)
                 }
             }
     }
@@ -230,6 +232,9 @@ internal class VdlBridge internal constructor() {
 
     internal fun pauseAll() { engine?.pauseAllInternal() }
     internal fun cancelAll() { engine?.cancelAll() }
+
+    /** Retry a FAILED task from its notification action; queue moves it FAILED -> PENDING. */
+    internal fun retry(id: String) { engine?.resume(id) }
     internal fun onDataSyncTimeout() { engine?.onDataSyncTimeout() }
     internal fun logLine(message: String) { engine?.logLine(message) }
     internal fun cancelNotification() { engine?.cancelNotification() }
