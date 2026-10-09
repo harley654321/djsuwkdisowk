@@ -37,7 +37,13 @@ internal object DashSelector {
                 asx.mimeType == null && asx.representations.any { it.height != null }
             }
             ?: throw IllegalArgumentException("no video AdaptationSet in MPD")
-        val audioSet = period.adaptationSets.firstOrNull { it.mimeType?.startsWith("audio/") == true }
+        // Audio set: set-level mime first, then representation codecs
+        // (real MPDs often omit the AdaptationSet mimeType and carry the
+        // codec string only on each Representation, e.g. mp4a.40.29).
+        val audioSet = period.adaptationSets.firstOrNull { asx ->
+            asx.mimeType?.startsWith("audio/") == true ||
+                asx.representations.any { r -> isAudioCodec(r.codecs) }
+        }
 
         val reps = videoSet.representations
         val allowed = maxHeight?.let { h -> reps.filter { (it.height ?: 0) in 1 until h + 1 } } ?: reps
@@ -58,6 +64,9 @@ internal object DashSelector {
         }
 
         val audio = audioSet?.representations?.maxByOrNull { it.bandwidth }
+        if (audio != null && audioSet?.mimeType?.startsWith("audio/") != true) {
+            log?.i(TAG) { "audio set detected via rep codecs codecs=${audio.codecs ?: "?"} decision=use-audio-track" }
+        }
 
         log?.i(TAG) {
             "selected video=${video.id} h=${video.height ?: "?"} bw=${video.bandwidth} " +
@@ -71,6 +80,14 @@ internal object DashSelector {
             audio = audio,
             audioLang = audioSet?.lang
         )
+    }
+
+    /** ISO codec families that mean "audio track". */
+    private fun isAudioCodec(codecs: String?): Boolean {
+        val c = codecs ?: return false
+        return c.startsWith("mp4a") || c.startsWith("opus") ||
+            c.startsWith("ac-3") || c.startsWith("ec-3") ||
+            c.startsWith("flac") || c.startsWith("mha1")
     }
 
     private const val TAG = "[VDL][DASH][selector]"

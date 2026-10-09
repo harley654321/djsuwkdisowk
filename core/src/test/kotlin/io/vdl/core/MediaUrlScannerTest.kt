@@ -77,6 +77,25 @@ class MediaUrlScannerTest {
     }
 
     @Test
+    fun domainContainingMp4IsNotATruncatedHit() {
+        // real-world regression: "https://www.mp4upload.com/embed-x.html"
+        // produced a bogus DIRECT hit "https://www.mp4" with the old
+        // non-greedy regex stopping at the first ".mp4" inside the hostname.
+        val page = """<a href="https://www.mp4upload.com/embed-v1mvrhx69yp7.html">mp4</a>""" +
+            """ watch at https://www.mp4upload.com/embed-v1mvrhx69yp7.html now"""
+        assertTrue(hits(page).none { it.url == "https://www.mp4" })
+        assertTrue(hits(page).none { it.kind == io.vdl.core.internal.extract.SourceKind.DIRECT })
+    }
+
+    @Test
+    fun extensionEmbeddedMidTokenIsNotAMatch() {
+        assertEquals(emptyList<String>(), hits("""x https://cdn.example/file.mp4.html y""").map { it.url })
+        // but a real direct file still matches
+        assertEquals(listOf("https://cdn.example/file.mp4"),
+            hits("""x https://cdn.example/file.mp4 y""").map { it.url })
+    }
+
+    @Test
     fun pageWithoutMediaYieldsEmptyList() {
         assertTrue(hits("<html><body>plain text page</body></html>").isEmpty())
     }

@@ -30,11 +30,14 @@ internal class DashParser internal constructor(private val log: VdlLog? = null) 
 
         val periods = children(root, "Period").map { p ->
             val pBase = attr(p, "BaseURL")?.takeIf { it.isNotBlank() }
+            // period duration (ISO 8601) or MPD-level duration: needed to
+            // expand open-ended SegmentTimeline repeats (r="-1").
+            val pEndSec = attr(p, "duration")?.let { parseIsoDuration(it) } ?: duration
             DashPeriod(
                 id = attr(p, "id"),
                 baseUrl = pBase,
                 adaptationSets = children(p, "AdaptationSet").mapNotNull { asEl ->
-                    val reps = children(asEl, "Representation").mapNotNull { repEl -> representation(repEl, asEl) }
+                    val reps = children(asEl, "Representation").mapNotNull { repEl -> representation(repEl, asEl, pEndSec) }
                     if (reps.isEmpty()) {
                         log?.w(TAG) { "adaptationSet without parseable representations id=${attr(asEl, "id") ?: "-"} decision=skip" }
                         null
@@ -66,7 +69,7 @@ internal class DashParser internal constructor(private val log: VdlLog? = null) 
 
     // -------------------------------------------------- representation
 
-    private fun representation(repEl: Element, asEl: Element): DashRepresentation? {
+    private fun representation(repEl: Element, asEl: Element, endSec: Double?): DashRepresentation? {
         val id = attr(repEl, "id") ?: run {
             log?.w(TAG) { "representation without id decision=skip" }
             return null
@@ -76,7 +79,7 @@ internal class DashParser internal constructor(private val log: VdlLog? = null) 
         val list = child(repEl, "SegmentList") ?: child(asEl, "SegmentList")
 
         return when {
-            tpl != null -> fromTemplate(repEl, asEl, id, tpl)
+            tpl != null -> fromTemplate(repEl, asEl, id, tpl, endSec)
             list != null -> fromSegmentList(repEl, id, list)
             else -> {
                 log?.e(TAG) { "representation id=$id has no SegmentTemplate/SegmentList decision=skip" }
@@ -86,7 +89,7 @@ internal class DashParser internal constructor(private val log: VdlLog? = null) 
     }
 
     private fun fromTemplate(
-        repEl: Element, asEl: Element, id: String, tpl: Element
+        repEl: Element, asEl: Element, id: String, tpl: Element, endSec: Double?
     ): DashRepresentation {
         // timescale is a SegmentTemplate attribute; 1 is the spec default
         val timescale = attr(tpl, "timescale")?.toLongOrNull() ?: 1L
@@ -101,7 +104,7 @@ internal class DashParser internal constructor(private val log: VdlLog? = null) 
         val startNumber = attr(tpl, "startNumber")?.toLongOrNull() ?: 1L
         val fixed = attr(tpl, "duration")?.toLongOrNull()
         val tl = child(tpl, "SegmentTimeline")
-        val timeline = if (tl != null) parseTimeline(tl) else emptyList()
+        val timeline = if (tl != null) parseTimeline(tl, timescale, endSec) else emptyList()
         return DashRepresentation(
             id = id,
             bandwidth = attr(repEl, "bandwidth")?.toLongOrNull()
@@ -138,8 +141,8 @@ internal class DashParser internal constructor(private val log: VdlLog? = null) 
         )
     }
 
-    /** S entries: t (first only), d (required), r (repeat). */
-    private fun parseTimeline(tl: Element): List<Pair<Long, Long>> {
+    /** S entries: t (first only), d (required), r (repeat; r=-1 = until period end). */
+    private fun parseTimeline(tl: Element, timescale: Long, endSec: Double?): List<Pair<Long, Long>> {
         val out = ArrayList<Pair<Long, Long>>()
         var cursor = 0L
         for (s in children(tl, "S")) {
@@ -149,13 +152,38 @@ internal class DashParser internal constructor(private val log: VdlLog? = null) 
             }
             val start = attr(s, "t")?.toLongOrNull() ?: cursor
             val repeat = attr(s, "r")?.toLongOrNull() ?: 0L
-            for (i in 0..repeat) {
+            val count = when {
+                repeat >= 0 -> (repeat + 1).toInt()
+                // ISO/IEC 23009-1: r="-1" repeats until the period/MPD end.
+                repeat == -1L -> {
+                    val endUnits = endSec?.let { (it * timescale).toLong() }
+                    val n = endUnits?.let { (((it - start) + d - 1) / d).toInt() }?.coerceAtLeast(1)
+                        ?: run {
+                            log?.w(TAG) { "timeline r=-1 without period duration decision=single-segment" }
+                            1
+                        }
+                    if (n > MAX_TIMELINE_UNITS) {
+                        log?.w(TAG) { "timeline r=-1 entries=$n capped decision=first-$MAX_TIMELINE_UNITS" }
+                        MAX_TIMELINE_UNITS
+                    } else {
+                        log?.i(TAG) { "timeline r=-1 open-repeat expanded endUnits=${endUnits ?: "-"} entries=$n" }
+                        n
+                    }
+                }
+                else -> {
+                    log?.w(TAG) { "timeline S r=$repeat invalid decision=single-segment" }
+                    1
+                }
+            }
+            for (i in 0 until count) {
                 out.add((start + i * d) to d)
             }
-            cursor = start + (repeat + 1) * d
+            cursor = start + count * d
         }
         return out
     }
+
+
 
     // ------------------------------------------------------ xml helpers
 
@@ -186,5 +214,8 @@ internal class DashParser internal constructor(private val log: VdlLog? = null) 
 
     private companion object {
         internal const val TAG = "[VDL][DASH][parser]"
+
+        /** Hostile-MPD guard: an open-ended repeat can never allocate unbounded units. */
+        private const val MAX_TIMELINE_UNITS = 50_000
     }
 }

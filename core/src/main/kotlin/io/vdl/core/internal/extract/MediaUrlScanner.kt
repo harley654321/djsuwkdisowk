@@ -18,8 +18,11 @@ internal class MediaUrlScanner internal constructor(private val log: VdlLog) {
     internal data class Hit(val url: String, val kind: SourceKind)
 
     // bounded: no dot-all, explicit char class, media extension anchored
+    // at the END of the candidate (greedy + terminator lookahead): a
+    // non-greedy variant truncated at the first ".mp4" inside a hostname
+    // (real-world: "www.mp4upload.com/embed-x.html" -> "https://www.mp4").
     private val plainMedia = Regex(
-        """https?://[^\s"'<>\\)]+?\.(?:m3u8|mpd|mp4|webm|ts)(?:\?[^\s"'<>\\)]*)?""",
+        """https?://[^\s"'<>\\)]+\.(?:m3u8|mpd|mp4|webm|ts)(?:\?[^\s"'<>\\)]*)?(?![\w.])""",
         setOf(RegexOption.IGNORE_CASE)
     )
 

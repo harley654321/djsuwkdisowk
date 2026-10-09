@@ -106,6 +106,54 @@ class DashParserTest {
     }
 
     @Test
+    fun openRepeatMinusOneExpandsToPeriodDuration() {
+        // real-world Akamai shape: a single S with r="-1" (repeat until the
+        // end) — before the fix this produced an EMPTY timeline and the
+        // downloader failed with "neither timeline, list, nor fixed duration".
+        val tpl = """<SegmentTemplate timescale="12288" startNumber="1" """ +
+            """initialization="video/init.mp4" media="video/seg_${'$'}Time${'$'}.m4s">""" +
+            """<SegmentTimeline><S t="0" d="61440" r="-1"/></SegmentTimeline>""" +
+            """</SegmentTemplate>"""
+        val mpd = parser.parse(staticMpd.replaceFirst(
+            Regex("""<SegmentTemplate[^>]*?/>"""), java.util.regex.Matcher.quoteReplacement(tpl)))
+        val rep = mpd.periods[0].adaptationSets[0].representations.first()
+        assertTrue(rep.usesTimeline)
+        // period = 7.5s * 12288 = 92160 units; ceil(92160 / 61440) = 2
+        assertEquals(2, rep.timeline.size)
+        assertEquals(0L to 61440L, rep.timeline[0])
+        assertEquals(61440L to 61440L, rep.timeline[1])
+        // $Time$ URLs use each segment's timeline start (unit 0 = init)
+        val units = DashPlan.build(
+            mpd, mpd.periods[0], rep, "https://cdn.example/v.mpd"
+        )
+        assertEquals(3, units.size)
+        assertTrue(units[1].url.endsWith("seg_0.m4s"))
+        assertTrue(units[2].url.endsWith("seg_61440.m4s"))
+    }
+
+    @Test
+    fun openRepeatWithoutDurationFallsBackToSingleSegment() {
+        val tpl = """<SegmentTemplate timescale="1000" media="v_${'$'}Time${'$'}.m4s">""" +
+            """<SegmentTimeline><S t="0" d="4000" r="-1"/></SegmentTimeline>""" +
+            """</SegmentTemplate>"""
+        val mpd = parser.parse(staticMpd.replaceFirst(
+            Regex("""<SegmentTemplate[^>]*?/>"""), java.util.regex.Matcher.quoteReplacement(tpl))
+            .replace(Regex("mediaPresentationDuration=\"[^\"]*\""), ""))
+        val rep = mpd.periods[0].adaptationSets[0].representations.first()
+        assertEquals(1, rep.timeline.size)
+    }
+
+    @Test
+    fun audioSetWithoutMimeIsDetectedViaRepCodecs() {
+        // real 1c-style MPD: AdaptationSet carries no mimeType; the audio
+        // identity lives in each Representation codecs="mp4a...".
+        val stripped = staticMpd.replace(Regex("""mimeType="audio/mp4" """), "")
+        val sel = DashSelector.select(parser.parse(stripped), null, null)
+        assertNotNull(sel.audio)
+        assertEquals("en", sel.audio!!.id)
+    }
+
+    @Test
     fun parsesSegmentList() {
         // swap the first (video) SegmentTemplate for a SegmentList
         val listXml = """<SegmentList><Initialization sourceURL="v-init.mp4"/>""" +
