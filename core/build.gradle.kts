@@ -63,10 +63,16 @@ dependencies {
     ksp(libs.room.compiler)
     implementation(libs.work.runtime.ktx)
 
+    // Real QuickJS engine (extractor). Android variant for the shipped AAR.
+    implementation(libs.quickjs.android)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.mockwebserver)
+    // JVM variant carries jni/linux_x64|macos natives: unit tests execute
+    // the REAL QuickJS, exactly like the harness and CI runners do.
+    testImplementation(libs.quickjs.jvm)
 }
 
 // AGP 8: the release component exists after evaluation, hence afterEvaluate here.
@@ -79,4 +85,16 @@ publishing {
             afterEvaluate { from(components["release"]) }
         }
     }
+}
+
+// quickjs-kt ships two variants with IDENTICAL class names but different
+// platform code: android (System.loadLibrary from the APK) and jvm
+// (extracts jni/<os>_<arch>/libquickjs.so from the classpath). Only the
+// jvm actual can load in a unit-test JVM, so its jar is placed FIRST on
+// the test classpath — its classes deterministically shadow the AAR's.
+val quickjsJvmJar = configurations.testRuntimeClasspath.map { cp ->
+    cp.filter { it.name.startsWith("quickjs-kt-jvm") }
+}
+tasks.withType<Test>().configureEach {
+    classpath = files(quickjsJvmJar) + classpath
 }

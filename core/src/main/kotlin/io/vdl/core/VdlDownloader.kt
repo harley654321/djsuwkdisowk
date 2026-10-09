@@ -27,6 +27,13 @@ public object VdlDownloader {
         bridge.initialize(context.applicationContext, config)
 
     /**
+     * Resolve a page URL (or direct media URL) into a concrete media source
+     * with its transport kind, via [ResolveOutcome]. The resolved url is
+     * ready for [download].
+     */
+    public suspend fun resolve(url: String): ResolveOutcome = bridge.require().resolve(url)
+
+    /**
      * Enqueue a download. Returns its id, or throws [DuplicateDownloadException]
      * when an identical url+fileName task already exists.
      */

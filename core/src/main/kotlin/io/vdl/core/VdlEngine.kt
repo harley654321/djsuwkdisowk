@@ -18,6 +18,8 @@ import io.vdl.core.internal.logging.VdlLog
 import io.vdl.core.internal.net.NetworkMonitor
 import io.vdl.core.internal.queue.QueueManager
 import io.vdl.core.internal.service.DownloadService
+import io.vdl.core.internal.extract.QuickJsEngine
+import io.vdl.core.internal.extract.SourceResolver
 import io.vdl.core.internal.service.NotificationHelper
 import io.vdl.core.internal.storage.AndroidPartFileFactory
 import io.vdl.core.internal.storage.AndroidSpaceChecker
@@ -81,6 +83,10 @@ internal class VdlEngine internal constructor(
         scope.launch { notificationLoop() }
         scheduleResumeWorker()
     }
+
+    /** Resolves a page (or direct media) URL into a downloadable source. */
+    internal suspend fun resolve(url: String): ResolveOutcome =
+        SourceResolver(client, log) { QuickJsEngine(log) }.resolve(url)
 
     internal suspend fun submit(request: DownloadRequest): String {
         val entity = DownloadTaskEntity.fromRequest(request, System.currentTimeMillis())

@@ -182,6 +182,10 @@ class QueueHlsIntegrationTest {
     private fun fmp4Server(): MockWebServer {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
+                "/page.html" -> MockResponse.Builder().code(200)
+                    .addHeader("Content-Type", "text/html")
+                    .body(m3u("<html><body><video><source src=\"/master.m3u8\" type=\"vnd.apple.mpegurl\"></video></body></html>"))
+                    .build()
                 "/master.m3u8" -> MockResponse.Builder().code(200).body(m3u(master)).build()
                 "/video.m3u8" -> MockResponse.Builder().code(200).body(m3u(videoMedia)).build()
                 "/audio.m3u8" -> MockResponse.Builder().code(200).body(m3u(audioMedia)).build()
@@ -232,6 +236,38 @@ class QueueHlsIntegrationTest {
     }
 
     @Test
+    fun resolvedFromHtmlPageDownloadsThroughTheRealQueue() = runBlocking {
+        // stage 1: resolve an embed PAGE into the HLS master URL
+        fmp4Server()
+        val resolver = io.vdl.core.internal.extract.SourceResolver(
+            client, testLog(sink)
+        ) { io.vdl.core.internal.extract.QuickJsEngine(testLog(sink)) }
+        val resolved = resolver.resolve(url("/page.html")) as ResolveOutcome.Success
+        assertEquals(SourceKind.HLS, resolved.source.kind)
+        assertEquals("html-scan", resolved.source.origin)
+        assertEquals(url("/master.m3u8"), resolved.source.url)
+
+        // stage 2: submit the RESOLVED url; the real queue downloads it
+        val repo = Repo()
+        val pub = Published()
+        val q = queue(repo, HlsQueueEngine(client, testLog(sink)), pub)
+        q.start()
+        val t = hlsTask(resolved.source.url)
+        assertTrue(q.submit(t))
+
+        awaitTrue { runBlocking { repo.get(t.id)?.state } == TaskState.COMPLETED.name }
+
+        val done = repo.get(t.id)!!
+        assertEquals(TaskState.COMPLETED.name, done.state)
+        assertEquals(2, occurrences(pub.bytes!!, "trak".toByteArray()))
+        // evidence: the whole chain, page fetch -> resolve -> queue -> mux
+        assertTrue(sink.lines.any { it.contains("page fetch text") })
+        assertTrue(sink.lines.any { it.contains("resolve end") })
+        assertTrue(sink.lines.any { it.contains("mux done") })
+        q.shutdown()
+    }
+
+    @Test
     fun hlsWithoutEngineFailsFast() = runBlocking {
         fmp4Server()
         val repo = Repo()
@@ -266,6 +302,10 @@ class QueueHlsIntegrationTest {
         val ts = { n: Int -> byteArrayOf(0x47) + randomBytes(300, n) }
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
+                "/page.html" -> MockResponse.Builder().code(200)
+                    .addHeader("Content-Type", "text/html")
+                    .body(m3u("<html><body><video><source src=\"/master.m3u8\" type=\"vnd.apple.mpegurl\"></video></body></html>"))
+                    .build()
                 "/master.m3u8" -> MockResponse.Builder().code(200).body(m3u(master)).build()
                 "/video.m3u8" -> MockResponse.Builder().code(200).body(m3u(tsMedia)).build()
                 "/audio.m3u8" -> MockResponse.Builder().code(200).body(m3u(tsMedia)).build()

@@ -7,6 +7,7 @@ okhttp = "5.4.0"
 room = "2.8.5"
 work = "2.12.0"
 turbine = "1.2.1"
+quickjs-kt = "1.0.0-alpha13"
 junit = "4.13.2"
 
 [libraries]
@@ -26,6 +27,9 @@ work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "w
 
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
 junit = { module = "junit:junit", version.ref = "junit" }
+
+quickjs-android = { module = "io.github.dokar3:quickjs-kt-android", version.ref = "quickjs-kt" }
+quickjs-jvm = { module = "io.github.dokar3:quickjs-kt-jvm", version.ref = "quickjs-kt" }
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }
