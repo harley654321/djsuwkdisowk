@@ -233,7 +233,9 @@ class QueueStressLabTest {
     // ------------------------------------------------------------- Q9
     /**
      * Q9 — recuperación de crash: entidades RUNNING huérfanas (proceso matado)
-     * no quedan atascadas: el arranque las reclama y completa.
+     * no quedan atascadas. Contrato real del QueueManager.start(): el sweep las
+     * recupera RUNNING -> PAUSED (log "recovered ... orphans"), y un resume
+     * explícito las completa desde los chunks persistidos.
      */
     @Test
     fun q9_orphanedRunningRecoveredOnStart() = runBlocking<Unit> {
@@ -242,6 +244,8 @@ class QueueStressLabTest {
             seed(makeEntity("https://a/q9-2", "q9-2.bin", state = TaskState.RUNNING))
         )
         newQueue(maxParallel = 2)
+        awaitTrue { orphans.all { stateOf(it.id) == TaskState.PAUSED.name } }
+        orphans.forEach { queue!!.resume(it.id) }
         awaitTrue { orphans.all { stateOf(it.id) == TaskState.COMPLETED.name } }
         assertEquals(2, engine.started.size)
     }
