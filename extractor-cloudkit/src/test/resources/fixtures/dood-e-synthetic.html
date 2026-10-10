@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>doodstream - watch cuekdui0sm0b 720p</title>
+</head>
+<body>
+    <div class="video-completo">
+        <iframe id="video-holder" allowfullscreen frameborder="0"></iframe>
+        <script type="text/javascript">
+            document.getElementById('video-holder').innerHTML =
+                '<img class="vpreview" src="/i/xxxx.jpg">';
+            $.get('https://dood.mock.local/pass_md5/8f3c1a99bd42e6ff2/',
+                function(data) {
+                    $('#video-holder').attr('src', data + random10char + '?token=8f3c1a99bd42e6ff2');
+                });
+        </script>
+    </div>
+</body>
+</html>

@@ -15,7 +15,13 @@ import okhttp3.Request
  */
 internal class CloudHttp(private val client: OkHttpClient) {
 
-    internal class Response(val body: String, val code: Int)
+    /**
+     * [finalUrl] is the URL AFTER redirects: rotating hosts (mixdrop.ag
+     * -> mxdrop.top, doodstream.com -> playmogo.com, live evidence
+     * 2026-10-10) change domain mid-flight and the extractor must speak
+     * the FINAL host's language.
+     */
+    internal class Response(val body: String, val code: Int, val finalUrl: String)
 
     /** GET [url] with optional [referer]; returns the decoded body or throws [IOException]. */
     @Throws(IOException::class)
@@ -32,7 +38,7 @@ internal class CloudHttp(private val client: OkHttpClient) {
             if (!resp.isSuccessful) {
                 throw IOException("http ${resp.code} for $url")
             }
-            return Response(String(body, Charsets.UTF_8), resp.code)
+            return Response(String(body, Charsets.UTF_8), resp.code, resp.request.url.toString())
         }
     }
 
@@ -114,16 +120,16 @@ internal class CloudHttp(private val client: OkHttpClient) {
  * are parsed with anchored regexes (the page is machine-generated), and
  * the decrypted JSON is flat with the two keys we read.
  */
-internal class VoeExtractor(private val http: CloudHttp) {
+internal class VoeExtractor(private val http: CloudHttp) : CloudKitExtractor {
 
-    internal fun matches(url: String): Boolean = KNOWN_DOMAINS.any { url.contains(it) }
+    override fun matches(url: String): Boolean = KNOWN_DOMAINS.any { url.contains(it) }
 
     /**
      * Resolves a voe embed URL to the master m3u8 (preferred) or the direct
      * mp4. Returns null when any step degrades (shell without redirect,
      * missing JSON script, undecryptable payload) — never throws.
      */
-    internal suspend fun resolve(url: String): CloudKitResult? {
+    override suspend fun resolve(url: String): CloudKitResult? {
         // Step 1: follow the rotating-domain JS redirect (0-1 hops).
         var playerUrl = url
         var page = try {
