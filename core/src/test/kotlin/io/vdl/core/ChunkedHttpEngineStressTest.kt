@@ -74,12 +74,21 @@ class ChunkedHttpEngineStressTest {
         val part = partFile()
         val outcome = runBlocking {
             engine().execute(
-                makeEntity(url(), threads = 12, chunkSizeBytes = 64L * 1024),
+                makeEntity(
+                    url(),
+                    threads = 12,
+                    chunkSizeBytes = 64L * 1024,
+                    retryBaseDelayMs = 1,
+                    retryMaxAttempts = 30
+                ),
                 part,
                 EngineState(),
                 { }
             )
         }
+        // El caos (24x429 + 6 desconexiones) consume presupuesto de reintentos:
+        // con retryMaxAttempts=30 el CONTRATO dice que debe completar. Si no
+        // completara, es un bug real del engine, no un presupuesto agotado.
         assertEquals(EngineOutcome.Success(data.size.toLong()), outcome)
         assertArrayEquals(data, part.readBytes())
         assertTrue("esperábamos >100 requests de rango, hubo ${dispatcher.rangeRequests.get()}",
