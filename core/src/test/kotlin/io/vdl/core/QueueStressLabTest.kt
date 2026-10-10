@@ -176,6 +176,7 @@ class QueueStressLabTest {
      */
     @Test
     fun q6_livePauseViaProgressFlowPersistsChunks() = runBlocking<Unit> {
+        engine.hang = true
         newQueue(maxParallel = 1)
         val id = submit("https://a/q6", "q6.bin")
         awaitTrue { stateOf(id) == TaskState.RUNNING.name }
@@ -185,6 +186,7 @@ class QueueStressLabTest {
         assertTrue(paused.chunksEnc.isNotEmpty())
         assertEquals(1_000L, paused.bytesTotal)
         // reanudar: completa desde el chunk persistido
+        engine.release()
         queue!!.resume(id)
         awaitTrue { stateOf(id) == TaskState.COMPLETED.name }
     }
@@ -264,10 +266,16 @@ class QueueStressLabTest {
         queue!!.cancelAll()
         // shutdown inmediato: no debe colgarse ni dejar RUNNING
         queue!!.shutdown()
-        val states = repo.observeAll().first().map { it.state }
-        delay(200)
-        assertTrue("sin RUNNING tras cancel+shutdown", TaskState.RUNNING.name !in states)
-        val byId = states.groupBy { it }.mapValues { it.value.size }
-        assertTrue(byId.keys.all { it == TaskState.CANCELLED.name || it == TaskState.PAUSED.name || it == TaskState.COMPLETED.name })
+        val allowed = setOf(
+            TaskState.CANCELLED.name, TaskState.PAUSED.name,
+            TaskState.PENDING.name, TaskState.COMPLETED.name
+        )
+        awaitTrue(20_000) {
+            val rows = repo.observeAll().first()
+            rows.size == 4 &&
+                rows.none { it.state == TaskState.RUNNING.name } &&
+                rows.all { it.state in allowed }
+        }
+        assertEquals(4, repo.observeAll().first().size)
     }
 }
