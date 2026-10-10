@@ -155,7 +155,10 @@ class QueueManagerTest {
 
     @After
     fun tearDown() {
-        queue?.shutdown()
+        // REGRA (StressLab Q10): shutdown es suspend desde v0.2 (pausa sincrona
+        // de RUNNING -> PAUSED persistido). En tearDown garantizamos que el
+        // queue muere sin dejar huérfanos RUNNING antes de borrar el scratch dir.
+        queue?.let { runBlocking { it.shutdown() } }
         dir.deleteRecursively()
     }
 
