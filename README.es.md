@@ -166,6 +166,15 @@ CI (GitHub Actions, Linux) corre la suite completa en cada push, más el
 drift-watch semanal `sync-cloudkit` sobre los archivos upstream de los
 que derivan los extractores GPL.
 
+### Pruebas live de extracción
+
+`tools/live-harness/` contiene el entorno de pruebas masivo contra URLs
+reales: `harness.py` extrae 75 URLs frescas de 5 proveedores vía sus APIs,
+`run-smoke.sh` resuelve la matriz completa en JVM (sin Android SDK) y
+`CloudKitMatrixLiveTest` replaya la misma matriz en CI. Ver
+[tools/live-harness/README.md](tools/live-harness/README.md) para
+reproducirlo en cualquier máquina limpia en minutos.
+
 ## Instalación
 
 No está en Maven Central. Publica localmente y depende de ella:
