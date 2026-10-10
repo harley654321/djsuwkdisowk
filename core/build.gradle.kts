@@ -66,6 +66,11 @@ dependencies {
     // Real QuickJS engine (extractor). Android variant for the shipped AAR.
     implementation(libs.quickjs.android)
 
+    // Host-aware embed extractors (recloudstream ports): MixDrop, Dood,
+    // StreamWish, Uqload, Voe. Used by SourceResolver before the generic
+    // HTML/JS resolution paths; unknown hosts cost one domain check.
+    implementation(project(":extractor-cloudkit"))
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)

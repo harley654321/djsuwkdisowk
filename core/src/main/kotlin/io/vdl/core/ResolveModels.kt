@@ -22,13 +22,19 @@ public enum class SourceKind { DIRECT, HLS, DASH }
  * @param url absolute http(s) media URL, ready for [VdlDownloader.download]
  * @param kind transport kind; decides which engine will run
  * @param origin evidence of how it was found: "direct" (the URL itself is
- *   media), "html-scan" (found in the page markup) or "js-solve:<technique>"
+ *   media), "cloudkit:<Extractor>" (host-aware extractor family),
+ *   "html-scan" (found in the page markup) or "js-solve:<technique>"
  *   (recovered from obfuscated JavaScript)
  * @param title best-effort page title, null when unknown
+ * @param referer Referer the media request SHOULD carry; some CDNs
+ *   (mixdrop/mxcontent, voe) validate it. Null when the host does not
+ *   care. Callers should pass it as a header when submitting the
+ *   download (see DownloadRequestBuilder headers).
  */
 public data class ResolvedSource(
     public val url: String,
     public val kind: SourceKind,
     public val origin: String,
-    public val title: String?
+    public val title: String?,
+    public val referer: String? = null
 )

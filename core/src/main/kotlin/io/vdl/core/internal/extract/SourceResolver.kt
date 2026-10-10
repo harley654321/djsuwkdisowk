@@ -1,5 +1,7 @@
 package io.vdl.core.internal.extract
 
+import io.vdl.cloudkit.CloudKit
+import io.vdl.cloudkit.CloudKitKind
 import io.vdl.core.DownloadError
 import io.vdl.core.ResolvedSource
 import io.vdl.core.ResolveOutcome
@@ -12,10 +14,14 @@ import java.util.concurrent.TimeUnit
  * Orchestrates page resolution end to end:
  *
  *   1. URL already looks like media -> direct, zero network.
- *   2. fetch (capped); media content type -> direct.
- *   3. HTML scan (markup + JSON) -> best-ranked candidate.
- *   4. JS solve (atob / fromCharCode / QuickJS concat) -> candidates.
- *   5. Otherwise Fatal with full evidence in the log.
+ *   2. CloudKit host-aware extractor family (recloudstream ports):
+ *      known embed hosts (mixdrop, dood, streamwish, uqload, voe)
+ *      resolve with their own protocol + referer. Unknown hosts cost
+ *      one in-memory domain check.
+ *   3. fetch (capped); media content type -> direct.
+ *   4. HTML scan (markup + JSON) -> best-ranked candidate.
+ *   5. JS solve (atob / fromCharCode / QuickJS concat) -> candidates.
+ *   6. Otherwise Fatal with full evidence in the log.
  *
  * The JsEngine is created per resolve() call and always closed: QuickJS
  * runtimes hold native memory, resolve() is rare (interactive), and a
@@ -37,7 +43,19 @@ internal class SourceResolver internal constructor(
                 return ok(url, kind, "direct")
             }
 
-            // 2. Fetch the page (or discover the URL is media).
+            // 2. Host-aware extractor family claims known embed hosts
+            // before the generic (slower, referer-less) paths run.
+            CloudKit.resolve(url, client)?.let { hit ->
+                val kind = when (hit.kind) {
+                    CloudKitKind.HLS -> SourceKind.HLS
+                    CloudKitKind.DIRECT -> SourceKind.DIRECT
+                }
+                log.i(TAG) { "resolve cloudkit extractor=${hit.extractor} kind=$kind" }
+                return ok(hit.url, kind, "cloudkit:${hit.extractor}", referer = hit.referer)
+            }
+            log.d(TAG) { "resolve cloudkit no-claim url=$url decision=generic" }
+
+            // 3. Fetch the page (or discover the URL is media).
             when (val f = PageFetcher(client, log).fetch(url)) {
                 is PageFetcher.Fetched.Media ->
                     return ok(url, f.kind, "direct")
@@ -50,13 +68,13 @@ internal class SourceResolver internal constructor(
                     return ResolveOutcome.Fatal(err)
                 }
                 is PageFetcher.Fetched.Html -> {
-                    // 3. scan markup/JSON first (cheap, most sites)
+                    // 4. scan markup/JSON first (cheap, most sites)
                     val scanner = MediaUrlScanner(log)
                     val title = pageTitle(f.body)
                     scanner.scan(f.body, url).firstOrNull()?.let {
                         return ok(it.url, it.kind, "html-scan", title)
                     }
-                    // 4. obfuscated JS — the QuickJS path
+                    // 5. obfuscated JS — the QuickJS path
                     val js = jsEngineFactory()
                     try {
                         JsUrlSolver(log, js).solve(f.body, url).firstOrNull()?.let {
@@ -77,8 +95,15 @@ internal class SourceResolver internal constructor(
         }
     }
 
-    private fun ok(url: String, kind: SourceKind, origin: String, title: String? = null) =
-        ResolveOutcome.Success(ResolvedSource(url = url, kind = kind, origin = origin, title = title))
+    private fun ok(
+        url: String,
+        kind: SourceKind,
+        origin: String,
+        title: String? = null,
+        referer: String? = null,
+    ) = ResolveOutcome.Success(
+        ResolvedSource(url = url, kind = kind, origin = origin, title = title, referer = referer)
+    )
 
     private fun pageTitle(html: String): String? {
         val m = Regex("""<title[^>]*>([^<]{1,256})</title>""", RegexOption.IGNORE_CASE)
