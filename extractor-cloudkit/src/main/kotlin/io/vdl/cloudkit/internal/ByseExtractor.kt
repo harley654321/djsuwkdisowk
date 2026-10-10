@@ -149,6 +149,9 @@ internal class ByseExtractor(private val http: CloudHttp) : CloudKitExtractor {
         internal val KNOWN_DOMAINS: List<String> = listOf(
             "byse.sx", "bysezejataos.com", "bysebuho.com", "bysevepoin.com",
             "byseqekaho.com", "byselapuix.com", "bysesukior.com",
+            // bysekoze.com: seen live 2026-10-10 serving latanime embeds
+            // (live-harness matrix, 2 URLs); same gcm engine chain.
+            "bysekoze.com",
         )
 
         internal fun b64UrlDecode(value: String): ByteArray {

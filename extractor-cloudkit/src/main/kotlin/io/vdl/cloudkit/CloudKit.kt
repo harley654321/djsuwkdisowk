@@ -57,6 +57,20 @@ public object CloudKit {
             null
         }
 
+    /**
+     * True when some extractor claims [url]'s domain. Distinguishes
+     * "not covered" (null by contract) from "covered but degraded"
+     * (null because the site challenged us) without doing network work.
+     */
+    public fun claims(url: String): Boolean {
+        val http = CloudHttp(probeClient)
+        return registry(http).any { it.matches(url) }
+    }
+
+    // Cheap throwaway client: matches() never touches the network, so
+    // the probe only needs a constructable CloudHttp.
+    private val probeClient: OkHttpClient by lazy { OkHttpClient() }
+
     // Stateless extractors; ordering documents the first-match rule.
     // Voe stays last: its domain list is fully disjoint from the rest.
     private fun registry(http: CloudHttp): List<CloudKitExtractor> = listOf(

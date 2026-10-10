@@ -5,6 +5,7 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.File
@@ -51,6 +52,18 @@ class CloudKitRoutingTest {
             org.junit.Assert.assertEquals("MixDrop", result!!.extractor)
             org.junit.Assert.assertTrue(result.url.startsWith("https://30xplewoo.mxcontent.net/"))
         }
+    }
+
+    @Test
+    fun `matrix domains added on 2026-10-10 are claimed by their extractors`() {
+        // Evidence: tools/live-harness/matrix.csv (75 URLs, 5 providers).
+        // These hosts were serving live embeds but no extractor claimed
+        // them; routing must own them after the domain additions.
+        assertTrue(CloudKit.claims("https://uqload.is/embed-mc2nfsmkwhz5.html"))
+        assertTrue(CloudKit.claims("https://dooodster.com/e/5pp01ow0bqwg"))
+        assertTrue(CloudKit.claims("https://bysekoze.com/e/l5wyw43yzj8y"))
+        // Sanity: the probe still says no on unknown hosts.
+        assertTrue(!CloudKit.claims("https://not-a-known-host.test/e/abc"))
     }
 
     @Test

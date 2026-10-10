@@ -65,6 +65,9 @@ internal class DoodExtractor(private val http: CloudHttp) : CloudKitExtractor {
             "dood.pm", "dood.to", "dood.so", "dood.ws", "dood.yt",
             "dood.li", "ds2play.com", "ds2video.com", "dsvplay.com",
             "vide0.net", "myvidplay.com", "doods.pro",
+            // dooodster.com: seen live 2026-10-10 serving veranimes/monoschinos
+            // embeds (live-harness matrix, 4 URLs); dood mirror family.
+            "dooodster.com",
         )
 
         internal val PASS_MD5_REGEX: Regex = Regex("""/pass_md5/[^']*""")

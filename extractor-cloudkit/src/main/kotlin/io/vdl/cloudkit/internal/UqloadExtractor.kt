@@ -37,6 +37,9 @@ internal class UqloadExtractor(private val http: CloudHttp) : CloudKitExtractor 
     internal companion object {
         internal val KNOWN_DOMAINS: List<String> = listOf(
             "uqload.com", "uqload.co", "uqload.cx", "uqload.bz",
+            // uqload.is: seen live 2026-10-10 serving monoschinos/veranimes
+            // embeds (live-harness matrix, 4 URLs); same engine + layout.
+            "uqload.is",
         )
 
         internal val SOURCES_REGEX: Regex = Regex("""sources:.*"(.*?)".*""")
