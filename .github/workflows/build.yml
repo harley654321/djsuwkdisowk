@@ -27,13 +27,20 @@ jobs:
       # AGP auto-installs any missing platform/build-tools via sdkmanager.
 
       - name: Build and test
-        run: ./gradlew :core:assembleDebug :core:assembleRelease :core:testDebugUnitTest :core:testReleaseUnitTest --no-daemon --stacktrace
+        run: ./gradlew :core:assembleDebug :core:assembleRelease :core:testDebugUnitTest :core:testReleaseUnitTest :extractor-cloudkit:assembleDebug :extractor-cloudkit:assembleRelease :extractor-cloudkit:testDebugUnitTest :extractor-cloudkit:testReleaseUnitTest --no-daemon --stacktrace
 
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
           name: core-aar
           path: core/build/outputs/aar/*.aar
+
+      - name: Upload cloudkit AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudkit-aar
+          path: extractor-cloudkit/build/outputs/aar/*.aar
+          if-no-files-found: error
           if-no-files-found: error
 
       - name: Upload test reports on failure
@@ -43,5 +50,6 @@ jobs:
           name: test-reports
           path: |
             core/build/reports/tests/**
+            extractor-cloudkit/build/reports/tests/**
             core/build/intermediates/**/lint-results*.xml
           if-no-files-found: warn

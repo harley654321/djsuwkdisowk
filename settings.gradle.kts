@@ -23,3 +23,4 @@ dependencyResolutionManagement {
 rootProject.name = "djsuwkdisowk"
 
 include(":core")
+include(":extractor-cloudkit")
