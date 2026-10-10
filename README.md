@@ -1,5 +1,7 @@
 # djsuwkdisowk
 
+**English** | [Español](README.es.md)
+
 A professional video-download library for Android. Kotlin-first API
 (builder DSL + Coroutines Flow + sealed results), modular, and fully
 tested: 143 JVM tests plus a live-internet E2E harness that verifies
@@ -173,4 +175,7 @@ implementation("io.vdl:core:0.1.0")
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The `extractor-cloudkit` module is GPL-3.0
+as it derives from upstream ports — see
+[extractor-cloudkit/LICENSE-NOTE.md](extractor-cloudkit/LICENSE-NOTE.md).
+(Documentación en español: [README.es.md](README.es.md).)
