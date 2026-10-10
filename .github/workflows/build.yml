@@ -41,7 +41,6 @@ jobs:
           name: cloudkit-aar
           path: extractor-cloudkit/build/outputs/aar/*.aar
           if-no-files-found: error
-          if-no-files-found: error
 
       - name: Upload test reports on failure
         if: failure()
