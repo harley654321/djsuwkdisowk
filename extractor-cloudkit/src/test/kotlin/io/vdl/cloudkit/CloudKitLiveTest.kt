@@ -74,4 +74,56 @@ class CloudKitLiveTest {
         val result = CloudKit.resolve("https://dhcplay.com/f/pqe67q5zix6x", client())
         assertNull("shell-challenged streamwish must degrade to null, never throw", result)
     }
+
+    @Test
+    fun `live byse resolves through the version-keyed gcm chain`(): Unit = runBlocking {
+        assumeTrue(live())
+        val result = CloudKit.resolve("https://byselapuix.com/e/nemilh1pfirr", client())
+        assertNotNull(
+            "live byse must resolve (api -> version key_parts -> AES-256-GCM)",
+            result,
+        )
+        assertEquals("Byse", result!!.extractor)
+        assertEquals(CloudKitKind.HLS, result.kind)
+        assertTrue("master playlist from the real capture", result.url.contains(".m3u8"))
+
+        // full loop: the CDN must serve the decrypted master.
+        client().newCall(
+            Request.Builder().url(result.url)
+                .header("User-Agent", CloudHttp.DESKTOP_UA)
+                .build(),
+        ).execute().use { resp ->
+            assertEquals("decrypted master.m3u8 serves without referer", 200, resp.code)
+        }
+    }
+
+    @Test
+    fun `live byse d-embed labeled filemoon on veranimes resolves too`(): Unit = runBlocking {
+        assumeTrue(live())
+        // VerAnimes labels this button "filemoon"; live capture 2026-10-10
+        // proves bysesukior.com serves the Byse SPA. Same extractor, /d/ path.
+        val result = CloudKit.resolve("https://bysesukior.com/d/rzly7gkdz2r8", client())
+        assertNotNull("bysesukior /d/ must resolve through the byse chain", result)
+        assertEquals("Byse", result!!.extractor)
+        assertEquals(CloudKitKind.HLS, result.kind)
+    }
+
+    @Test
+    fun `live upnshare decrypts the uns bio api`(): Unit = runBlocking {
+        assumeTrue(live())
+        val result = CloudKit.resolve("https://animeav1.uns.bio/#kjkatd", client())
+        assertNotNull("live upnshare must decrypt the hex CBC payload", result)
+        assertEquals("Upnshare", result!!.extractor)
+        assertEquals(CloudKitKind.HLS, result.kind)
+        assertTrue("master playlist from the real capture", result.url.contains(".m3u8"))
+    }
+
+    @Test
+    fun `live vidhide mirror is unreachable from this network`(): Unit = runBlocking {
+        assumeTrue(live())
+        // movearnpre.com connection-resets every client from this sandbox
+        // (two independent captures, 2026-10-10): typed degradation, never throw.
+        val result = CloudKit.resolve("https://movearnpre.com/file/hzd7fiqnsz2y", client())
+        assertNull("unreachable vidhide must degrade to null, never throw", result)
+    }
 }

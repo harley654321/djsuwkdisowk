@@ -1,11 +1,14 @@
 package io.vdl.cloudkit
 
 import io.vdl.cloudkit.internal.CloudHttp
+import io.vdl.cloudkit.internal.ByseExtractor
 import io.vdl.cloudkit.internal.CloudKitExtractor
 import io.vdl.cloudkit.internal.DoodExtractor
 import io.vdl.cloudkit.internal.MixDropExtractor
 import io.vdl.cloudkit.internal.StreamWishExtractor
+import io.vdl.cloudkit.internal.UpnshareExtractor
 import io.vdl.cloudkit.internal.UqloadExtractor
+import io.vdl.cloudkit.internal.VidHideExtractor
 import io.vdl.cloudkit.internal.VoeExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -61,6 +64,9 @@ public object CloudKit {
         DoodExtractor(http),
         StreamWishExtractor(http),
         UqloadExtractor(http),
+        ByseExtractor(http),
+        VidHideExtractor(http),
+        UpnshareExtractor(http),
         VoeExtractor(http),
     )
 }

@@ -28,6 +28,13 @@ real downloads, real network cuts and byte-exact resumes.
   logging with lazy messages, monotonic durations and explicit
   decisions (`decision=retry`, `decision=fatal`) — greppable evidence
   for every state transition.
+- **Host extractors as an optional module**: `extractor-cloudkit`
+  (GPL-3.0, isolated from the MIT `:core`) resolves embed pages from the
+  major video hosts — voe, mixdrop, dood, streamwish, uqload, byse,
+  vidhide, upnshare — into ready-to-fetch media URLs, with referer and
+  HLS/DIRECT typed. Every extractor ships with a fixture test built
+  from a live capture, and a CI drift-watch pins the upstream files the
+  ports derive from.
 
 ## Requirements
 
@@ -100,8 +107,10 @@ death never loses more than one in-flight unit.
 
 ## Architecture
 
-Single Gradle module (`:core`) with strict internal seams — the public
-API is `io.vdl.core`, everything else is `internal`:
+Two Gradle modules. `:core` keeps strict internal seams — the public API
+is `io.vdl.core`, everything else is `internal`. `:extractor-cloudkit`
+(GPL-3.0) stays a separate module so its upstream-derived code never
+mixes with the MIT core:
 
 ```
 core/src/main/kotlin/io/vdl/core/
@@ -121,14 +130,34 @@ core/src/main/kotlin/io/vdl/core/
     └── work/     # WorkManager glue
 ```
 
+```
+extractor-cloudkit/src/main/kotlin/io/vdl/cloudkit/
+├── CloudKit.kt              # public: resolve(url, client) -> CloudKitResult?
+└── internal/                # one extractor per host family (GPL-3.0 ports)
+    ├── ByseExtractor.kt        # api envelope -> version-keyed AES-256-GCM
+    ├── UpnshareExtractor.kt   # uns.bio hex payload -> AES-128-CBC
+    ├── VidHideExtractor.kt    # jwplayer/packed player pages
+    └── Voe/MixDrop/Dood/StreamWish/Uqload …
+```
+
+Optional host resolution, one call:
+
+```kotlin
+val media = CloudKit.resolve(embedUrl, okHttpClient)
+// media?.url / media?.kind (HLS|DIRECT) / media?.referer / media?.extractor
+```
+
 ## Build & test
 
 ```
 ./gradlew :core:assembleRelease
 ./gradlew :core:testReleaseUnitTest
+./gradlew :extractor-cloudkit:testDebugUnitTest
 ```
 
-CI (GitHub Actions, Linux) runs the full suite on every push.
+CI (GitHub Actions, Linux) runs the full suite on every push, plus the
+weekly `sync-cloudkit` drift-watch over the upstream files the
+GPL extractors derive from.
 
 ## Installation
 

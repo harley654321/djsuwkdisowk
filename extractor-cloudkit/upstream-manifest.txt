@@ -1,0 +1,32 @@
+# Upstream drift manifest for extractor-cloudkit.
+#
+# Each port in this module derives from one file of recloudstream/cloudstream
+# (GPL-3.0, https://github.com/recloudstream/cloudstream). This manifest pins
+# the exact upstream state each port was verified against. The
+# sync-cloudkit CI job re-downloads these files weekly and fails loudly when
+# upstream moves, so a protocol change never silently rots a port.
+#
+# Format: <sha256>  <path under library/src/commonMain/kotlin/com/lagradost/cloudstream3/>
+# Upstream commit this manifest was pinned at:
+#   4846fbacd2f93e373f1bc7c231f2d4c03c812f3d (2026-10-09, master)
+#
+# Port map (port <- upstream):
+#   VoeExtractor.kt            <- Voe.kt
+#   MixDropExtractor.kt        <- MixDrop.kt
+#   DoodExtractor.kt           <- DoodExtractor.kt
+#   StreamWishExtractor.kt     <- StreamWishExtractor.kt
+#   UqloadExtractor.kt          <- Uqload.kt
+#   Packer.kt                   <- Packer (in StreamWish/MixDrop upstream files)
+#   ByseExtractor.kt            <- ByseSX.kt        (protocol evolved: version-keyed
+#                                                    key_parts, reverse-engineered
+#                                                    from the live bundle 2026-10-10)
+#   VidHideExtractor.kt         <- VidHidePro.kt
+#   UpnshareExtractor.kt        <- VidStack.kt
+658c545ec7832d8a39ba0b0a6aec53a474c2707af72e3ec0e4f07b9470976069  extractors/Voe.kt
+18ae9bd9818d98434ff2aae41210ad88178f75fbcd6b2a2f3f57e903fd35292f  extractors/MixDrop.kt
+8853d67aa02e7bb225b2a3504dab5b075969e3dcc77e0fc9eb7abc8e68bc4763  extractors/DoodExtractor.kt
+681f7c56695dde56f861de5f03cbcac6015b071f29ba25d6b821333e0825f0e2  extractors/StreamWishExtractor.kt
+87ec30ab9ece5be6e3e9abd67d3358a815541a79938389a1ddc1305a02eb0c21  extractors/Uqload.kt
+50c8846938c07831ef5f50356c015b0b9849a2563f2cd8c9f9bfd9bb320aa834  extractors/ByseSX.kt
+e0f1197862f87127af6d35823125a50b58d0c2155fef13a20334e21b9d802716  extractors/VidHidePro.kt
+876e400d897e69f26f64a8720df1518a4ad95a6805d4241c03f1054b576f10ac  extractors/VidStack.kt
