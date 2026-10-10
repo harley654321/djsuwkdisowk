@@ -1,0 +1,199 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "a0a1ca0117acb02bdde55b85f50c4920",
+    "entities": [
+      {
+        "tableName": "tasks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `url` TEXT NOT NULL, `fileName` TEXT NOT NULL, `kind` TEXT NOT NULL DEFAULT 'DIRECT', `maxHeight` INTEGER, `destinationType` TEXT NOT NULL, `destinationSubfolder` TEXT, `headersEnc` TEXT NOT NULL, `priority` TEXT NOT NULL, `state` TEXT NOT NULL, `bytesTotal` INTEGER NOT NULL, `bytesDownloaded` INTEGER NOT NULL, `etag` TEXT, `contentType` TEXT, `acceptRanges` INTEGER NOT NULL, `chunksEnc` TEXT NOT NULL, `attempt` INTEGER NOT NULL, `wifiOnly` INTEGER NOT NULL, `showNotification` INTEGER NOT NULL, `threads` INTEGER NOT NULL, `chunkSizeBytes` INTEGER NOT NULL, `retryBaseDelayMs` INTEGER NOT NULL, `retryMaxAttempts` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `lastError` TEXT, `resultUri` TEXT, `resultPath` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "url",
+            "columnName": "url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileName",
+            "columnName": "fileName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'DIRECT'"
+          },
+          {
+            "fieldPath": "maxHeight",
+            "columnName": "maxHeight",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "destinationType",
+            "columnName": "destinationType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "destinationSubfolder",
+            "columnName": "destinationSubfolder",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "headersEnc",
+            "columnName": "headersEnc",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priority",
+            "columnName": "priority",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bytesTotal",
+            "columnName": "bytesTotal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bytesDownloaded",
+            "columnName": "bytesDownloaded",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "etag",
+            "columnName": "etag",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "contentType",
+            "columnName": "contentType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "acceptRanges",
+            "columnName": "acceptRanges",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chunksEnc",
+            "columnName": "chunksEnc",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attempt",
+            "columnName": "attempt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wifiOnly",
+            "columnName": "wifiOnly",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "showNotification",
+            "columnName": "showNotification",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "threads",
+            "columnName": "threads",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chunkSizeBytes",
+            "columnName": "chunkSizeBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "retryBaseDelayMs",
+            "columnName": "retryBaseDelayMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "retryMaxAttempts",
+            "columnName": "retryMaxAttempts",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "resultUri",
+            "columnName": "resultUri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "resultPath",
+            "columnName": "resultPath",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_tasks_url_fileName",
+            "unique": true,
+            "columnNames": [
+              "url",
+              "fileName"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_tasks_url_fileName` ON `${TABLE_NAME}` (`url`, `fileName`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a0a1ca0117acb02bdde55b85f50c4920')"
+    ]
+  }
+}
