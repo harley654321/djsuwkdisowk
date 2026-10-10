@@ -25,3 +25,5 @@ Thumbs.db
 secrets.properties
 
 # Room schemas are tracked (schemas/) - do not ignore
+__pycache__/
+*.pyc
