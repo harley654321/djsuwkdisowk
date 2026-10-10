@@ -58,16 +58,17 @@ Si el sandbox local está roto, abrir un PR vacío fuerza a CI a validar TODO.
 - El token de GitHub vive en `.agents/.env` del agente (GITHUB_TOKEN), no en
   el repo. El remote del repo ya lleva el token embebido (push funciona solo).
 
-## Estado del entorno de estrés (honesto)
+## Estado del entorno de estrés
 
-- **Lo que SÍ está versionado y seguro:** los 3 fixes de producción del
-  QueueManager (shutdown race, bomba inicial en start(), dispatch durante
-  apagado) + `QueueManagerTest` con tests de concurrencia (orphan sweep,
-  runningOrphans, pump) corriendo en CI en cada push.
-- **Lo que se PERDIÓ:** el harness de caos Q1–Q10 original (se construyó en
-  un árbol fuera del repo entre sesiones del 2026-10-10 01:11–01:50).
-  La lección ya está aplicada: TODO lo nuevo vive en el repo (live-harness
-  quedó 100% versionado el mismo día).
-- **Pendiente:** reconstruir StressLab como módulo versionado (p.ej.
-  `tools/stresslab/` o tests core dedicados) para re-probar caos de cola,
-  cancelaciones masivas, pausado y cortes de red bajo concurrencia.
+- **StressLab RECONSTRUIDO y versionado (2026-10-10, commit b37df39):**
+  `core/src/test/kotlin/io/vdl/core/QueueStressLabTest.kt` recrea los 10
+  escenarios de caos (Q1–Q10): sumidero masivo 60 tareas, cancelación
+  masiva en vuelo, regresiones de los 3 bugs corregidos (cancelada en cola
+  no despacha, bomba inicial en start(), sin dispatch tras shutdown),
+  tormenta pause/resume, shutdown con RUNNING, pausa viva, recuperación de
+  huérfanas (contrato: RUNNING→PAUSED + resume) y arranque en frío con
+  cancelAll+shutdown. Corre en CI en cada push; ya no puede perderse.
+- Los 3 fixes de producción + `QueueManagerTest` siguen en el repo y en CI.
+- Contratos documentados por el estrés: start() barre huérfanas RUNNING→PAUSED
+  (nunca auto-despacha tras crash); shutdown es suspend con pausa sincrónica.
+- Lección aplicada: TODO lo nuevo vive en el repo desde el día uno.
