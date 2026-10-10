@@ -271,11 +271,13 @@ class QueueStressLabTest {
             TaskState.PENDING.name, TaskState.COMPLETED.name
         )
         awaitTrue(20_000) {
-            val rows = repo.observeAll().first()
+            // observeAll().first() es suspend y el lambda de awaitTrue no lo
+            // es: puente con runBlocking (repo in-memory, no bloquea IO real).
+            val rows = runBlocking { repo.observeAll().first() }
             rows.size == 4 &&
                 rows.none { it.state == TaskState.RUNNING.name } &&
                 rows.all { it.state in allowed }
         }
-        assertEquals(4, repo.observeAll().first().size)
+        assertEquals(4, runBlocking { repo.observeAll().first() }.size)
     }
 }
