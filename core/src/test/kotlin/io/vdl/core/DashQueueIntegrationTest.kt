@@ -196,7 +196,7 @@ class DashQueueIntegrationTest {
         assertTrue("leftover scratch", tmp.listFiles()!!.isEmpty())
         assertTrue(sink.lines.any { it.contains("[VDL][DASH][queue-engine]") && it.contains("mux done") })
         assertTrue(sink.lines.any { it.contains("completed task=${t.id}") })
-        q.shutdown()
+        runBlocking { q.shutdown() }
     }
 
     @Test
@@ -218,7 +218,7 @@ class DashQueueIntegrationTest {
         assertTrue(done.lastError!!.contains("DASH engine not configured"))
         assertTrue(pub.task == null)
         assertTrue(sink.lines.any { it.contains("dash-engine-not-configured") })
-        q.shutdown()
+        runBlocking { q.shutdown() }
     }
 
     // -------------------------------------------------------------- helpers

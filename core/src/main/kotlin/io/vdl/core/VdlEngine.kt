@@ -143,7 +143,12 @@ internal class VdlEngine internal constructor(
         log.i(TAG) { message }
     }
 
-    internal fun shutdown() {
+    /**
+     * REGRA (StressLab Q10): suspend — queue.shutdown() ahora pausa SINCRONA
+     * las tareas RUNNING (persiste snapshot PAUSED) antes de matar el scope.
+     * Contrato: al terminar, ninguna tarea queda RUNNING en la DB.
+     */
+    internal suspend fun shutdown() {
         log.i(TAG) { "engine shutdown" }
         queue.shutdown()
         scope.cancel()

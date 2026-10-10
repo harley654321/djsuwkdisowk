@@ -96,6 +96,7 @@ internal class QueueManager internal constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val events = Channel<QueueEvent>(Channel.UNLIMITED)
+    private val shuttingDown = java.util.concurrent.atomic.AtomicBoolean(false)
     private val progressMap = MutableStateFlow<Map<String, Progress>>(emptyMap())
     private val running = ConcurrentHashMap<String, RunningTask>()
     private val lastPersist = HashMap<String, Long>()
@@ -112,9 +113,24 @@ internal class QueueManager internal constructor(
         }
     }
 
-    internal fun shutdown() {
+    /**
+     * REGRA (StressLab Q10): la pausa de tareas RUNNING debe ser SINCRONA con
+     * el estado persistido. La version anterior encolaba eventos Pause y luego
+     * cancelaba el scope: el loop moria sin procesarlos y la tarea quedaba
+     * RUNNING en el repo con un .part sin snapshot. La restauracion tras crash
+     * depende de este contrato.
+     */
+    internal suspend fun shutdown() {
+        shuttingDown.set(true)
         log.i(TAG) { "queue shutdown: ${running.size} running tasks paused" }
-        for (id in running.keys) pause(id)
+        val ids = running.keys.toList()
+        for (id in ids) {
+            val rt = running.remove(id) ?: continue
+            rt.job.cancel()
+            rt.job.join()
+            persistSnapshot(rt, TaskState.PAUSED)
+            log.i(TAG) { "paused(shutdown) task=$id have=${rt.engineState.chunks.sumOf { it.downloaded }}" }
+        }
         scope.cancel()
     }
 
@@ -140,6 +156,20 @@ internal class QueueManager internal constructor(
     internal fun observeAllTasks(): Flow<List<DownloadTaskEntity>> = repository.observeAll()
 
     private suspend fun loop() = coroutineScope {
+        // REGRA (StressLab Q10): un queue que arranca sobre un repo con sesion
+        // previa debe (1) convertir RUNNING huerfanos (kill duro del proceso)
+        // en PAUSED y (2) despachar los PENDING ya existentes. Sin pump inicial
+        // la cola jamas arranca tras restart.
+        val orphans = repository.runningOrphans()
+        if (orphans.isNotEmpty()) {
+            log.w(TAG) { "recovered ${orphans.size} RUNNING orphans -> PAUSED ids=${orphans.map { it.id }}" }
+            for (o in orphans) repository.update(o.withState(TaskState.PAUSED, clockMs()))
+        }
+        try {
+            pump()
+        } catch (t: Throwable) {
+            log.e(TAG, t) { "startup pump crash decision=continue" }
+        }
         for (e in events) {
             try {
                 handle(e)
@@ -228,9 +258,12 @@ internal class QueueManager internal constructor(
         partFactory.cleanup(id)
         val t = repository.get(id) ?: return
         if (t.state != TaskState.COMPLETED.name) {
+            log.i(TAG) { "cancelled(${if (rt != null) "running" else "queued"}) task=$id oldState=${t.state}" }
             repository.update(
                 t.copy(state = TaskState.CANCELLED.name, updatedAt = clockMs())
             )
+        } else {
+            log.i(TAG) { "cancel ignored task=$id reason=alreadyCompleted" }
         }
         progressMap.value = progressMap.value - id
     }
@@ -308,6 +341,11 @@ internal class QueueManager internal constructor(
     }
 
     private suspend fun pump() {
+        // REGRA (StressLab Q10): durante shutdown() el join del engine moribundo
+        // deja entrar un EngineFinished al loop; pump() NO debe despachar trabajo
+        // nuevo en pleno apagado (la version anterior iniciaba la siguiente tarea
+        // y scope.cancel() la mataba dejandola RUNNING huerfana).
+        if (shuttingDown.get()) return
         if (systemPaused.get()) {
             log.i(TAG) { "pump skipped reason=systemPaused" }
             return

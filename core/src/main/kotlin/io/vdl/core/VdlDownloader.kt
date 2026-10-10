@@ -57,6 +57,10 @@ public object VdlDownloader {
 
     public suspend fun getTask(id: String): TaskSnapshot? = bridge.require().getTask(id)
 
-    /** Pauses running tasks, stops the loop and closes the database. */
-    public fun shutdown() { bridge.engine?.shutdown() }
+    /**
+     * Pauses running tasks (synchronously persisted as PAUSED), stops the loop
+     * and closes the database. Suspend since v0.2: guarantees no task is left
+     * RUNNING in the DB after app teardown (StressLab Q10 contract).
+     */
+    public suspend fun shutdown() { bridge.engine?.shutdown() }
 }

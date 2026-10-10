@@ -232,7 +232,7 @@ class QueueHlsIntegrationTest {
         // evidence: mux + completion in the structured log
         assertTrue(sink.lines.any { it.contains("[VDL][HLS][queue-engine]") && it.contains("mux done") })
         assertTrue(sink.lines.any { it.contains("completed task=${t.id}") })
-        q.shutdown()
+        runBlocking { q.shutdown() }
     }
 
     @Test
@@ -264,7 +264,7 @@ class QueueHlsIntegrationTest {
         assertTrue(sink.lines.any { it.contains("page fetch text") })
         assertTrue(sink.lines.any { it.contains("resolve end") })
         assertTrue(sink.lines.any { it.contains("mux done") })
-        q.shutdown()
+        runBlocking { q.shutdown() }
     }
 
     @Test
@@ -283,7 +283,7 @@ class QueueHlsIntegrationTest {
         assertTrue(done.lastError!!.contains("HLS engine not configured"))
         assertTrue(pub.task == null)
         assertTrue(sink.lines.any { it.contains("hls-engine-not-configured") })
-        q.shutdown()
+        runBlocking { q.shutdown() }
     }
 
     @Test
@@ -335,7 +335,7 @@ class QueueHlsIntegrationTest {
         assertEquals("video/mp2t", done.contentType)
         assertTrue(sink.lines.any { it.contains("ts+audio cannot atom-mux") && it.contains("decision=video-only") })
         assertTrue("leftover scratch: ${tmp.listFiles()!!.map { it.name }}", tmp.listFiles()!!.isEmpty())
-        q.shutdown()
+        runBlocking { q.shutdown() }
     }
 
     private fun occurrences(hay: ByteArray, needle: ByteArray): Int {
